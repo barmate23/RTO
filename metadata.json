@@ -1,0 +1,5 @@
+{
+  "name": "RTO Training Center Manager",
+  "description": "A mobile-responsive management system for RTO driving course candidates, featuring attendance tracking, fee management, and offline-first local storage.",
+  "requestFramePermissions": []
+}
