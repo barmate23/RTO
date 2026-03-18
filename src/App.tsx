@@ -62,7 +62,7 @@ const Header = ({ title, showBack, onBack }: { title: string, showBack?: boolean
   </header>
 );
 
-import { syncCandidates } from './services/api';
+import { syncCandidates, addCandidateToServer } from './services/api';
 
 // --- Screens ---
 
@@ -296,7 +296,7 @@ const CandidateList = ({ onNavigate, showToast }: { onNavigate: (screen: string,
   );
 };
 
-const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editId?: number, showToast: (m: string) => void }) => {
+const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editId?: number, showToast: (m: string, t?: 'success' | 'error') => void }) => {
   const [formData, setFormData] = useState<Partial<Candidate>>({
     name: '',
     mobile: '',
@@ -308,6 +308,7 @@ const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editI
     collectedFee: 0,
     status: 'active'
   });
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (editId) {
@@ -319,14 +320,33 @@ const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editI
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editId) {
-      await db.candidates.update(editId, formData);
-      showToast('Candidate updated successfully');
-    } else {
-      await db.candidates.add(formData as Candidate);
-      showToast('Candidate added successfully');
+    setIsSaving(true);
+    try {
+      if (editId) {
+        await db.candidates.update(editId, formData);
+        showToast('Candidate updated successfully', 'success');
+      } else {
+        // Save locally first
+        await db.candidates.add(formData as Candidate);
+        showToast('Candidate saved locally', 'success');
+
+        // Then sync to server in background
+        try {
+          const result = await addCandidateToServer(formData as Candidate);
+          if (result.success) {
+            showToast('Candidate synced to server ✓', 'success');
+          } else {
+            showToast(`Server: ${result.message}`, 'error');
+          }
+        } catch (serverError) {
+          console.error('Server sync failed:', serverError);
+          showToast('Saved locally, server sync failed', 'error');
+        }
+      }
+      onBack();
+    } finally {
+      setIsSaving(false);
     }
-    onBack();
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -439,9 +459,20 @@ const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editI
 
         <button 
           type="submit"
-          className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-[0.98] transition-transform"
+          disabled={isSaving}
+          className={cn(
+            "w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg transition-transform flex items-center justify-center gap-2",
+            isSaving ? "opacity-70 pointer-events-none" : "active:scale-[0.98]"
+          )}
         >
-          {editId ? 'Update Candidate' : 'Save Candidate'}
+          {isSaving ? (
+            <>
+              <Clock size={18} className="animate-spin" />
+              Saving...
+            </>
+          ) : (
+            editId ? 'Update Candidate' : 'Save Candidate'
+          )}
         </button>
       </form>
     </div>

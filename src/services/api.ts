@@ -4,6 +4,39 @@ import { db } from '../db';
 const API_URL = 'https://script.google.com/macros/s/AKfycbw8z2SHsLvq3CTyR9LrbNZ5dPyf0-j8Dqmgh9io5AXOuW9atQmpi9z5EMssbQo32YXa9w/exec';
 const API_KEY = 'RTO_ACADEMY_2026';
 
+/**
+ * Saves a new candidate to the Google Apps Script backend.
+ * Maps internal field names to what the API expects:
+ *   mobile      → phone
+ *   joiningDate → joinDate
+ *   courseType  → course
+ */
+export async function addCandidateToServer(candidate: Candidate): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      apiKey: API_KEY,
+      action: 'addCandidate',
+      name: candidate.name,
+      phone: candidate.mobile,
+      address: candidate.address,
+      aadhaar: candidate.aadhaar,
+      joinDate: candidate.joiningDate,
+      course: candidate.courseType,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server error: ${response.status} ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data as { success: boolean; message: string };
+}
+
 export async function fetchCandidatesFromServer() {
   try {
     const response = await fetch(API_URL, {
