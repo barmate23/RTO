@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, 
   Users, 
@@ -21,6 +21,20 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, parseIS
 import { db } from './db';
 import { Candidate, Attendance, Payment, Document } from './types';
 import { cn, formatCurrency } from './utils';
+import { fetchCandidatesFromServer } from './services/api';
+import { createContext, useContext } from 'react';
+
+const CandidatesContext = createContext<{
+  candidates: Candidate[];
+  isLoading: boolean;
+  fetchCandidates: () => Promise<void>;
+}>({
+  candidates: [],
+  isLoading: false,
+  fetchCandidates: async () => {},
+});
+
+export const useCandidates = () => useContext(CandidatesContext);
 
 // --- Components ---
 
@@ -52,57 +66,36 @@ const BottomNav = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTa
 };
 
 const Header = ({ title, showBack, onBack }: { title: string, showBack?: boolean, onBack?: () => void }) => (
-  <header className="sticky top-0 bg-white/80 backdrop-blur-md z-40 px-6 py-4 flex items-center gap-4 border-b border-slate-100">
+  <header className="sticky top-0 bg-white/70 backdrop-blur-lg z-40 px-6 py-4 flex items-center gap-4 border-b border-slate-100/50">
     {showBack && (
-      <button onClick={onBack} className="p-1 -ml-1 text-slate-600">
-        <ArrowLeft size={24} />
+      <button onClick={onBack} className="p-2 -ml-2 text-slate-600 active:bg-slate-100 rounded-full transition-colors">
+        <ArrowLeft size={22} />
       </button>
     )}
-    <h1 className="text-xl font-bold text-slate-900 tracking-tight">{title}</h1>
+    <h1 className="text-xl font-extrabold text-slate-900 tracking-tight leading-none">{title}</h1>
   </header>
 );
 
-import { syncCandidates } from './services/api';
 
 // --- Screens ---
 
 const Dashboard = ({ onNavigate, showToast }: { onNavigate: (screen: string, params?: any) => void, showToast: (m: string, t?: 'success' | 'error') => void }) => {
-  const [isSyncing, setIsSyncing] = useState(false);
-  const candidates = useLiveQuery(() => db.candidates.toArray()) || [];
-  const payments = useLiveQuery(() => db.payments.toArray()) || [];
+  const { candidates, isLoading: isSyncing, fetchCandidates } = useCandidates();
+
+  const handleSync = async () => {
+    try {
+      await fetchCandidates();
+      showToast('Fetched live candidates from server', 'success');
+    } catch {
+      showToast('Failed to fetch from server', 'error');
+    }
+  };
 
   const stats = {
     total: candidates.length,
     active: candidates.filter(c => c.status === 'active').length,
     completed: candidates.filter(c => c.status === 'completed').length,
     pendingFee: candidates.reduce((acc, c) => acc + (c.totalFee - c.collectedFee), 0),
-  };
-
-  useEffect(() => {
-    const checkAndSync = async () => {
-      const count = await db.candidates.count();
-      if (count === 0) {
-        handleSync();
-      }
-    };
-    checkAndSync();
-  }, []);
-
-  const handleSync = async () => {
-    setIsSyncing(true);
-    try {
-      const result = await syncCandidates();
-      if (result.total > 0) {
-        showToast(`Sync: ${result.added} new, ${result.updated} updated`, 'success');
-      } else {
-        showToast('Sync complete. No candidates found.', 'success');
-      }
-    } catch (error) {
-      console.error('Sync failed:', error);
-      showToast('Sync failed. Check connection or API key.', 'error');
-    } finally {
-      setIsSyncing(false);
-    }
   };
 
   return (
@@ -129,25 +122,56 @@ const Dashboard = ({ onNavigate, showToast }: { onNavigate: (screen: string, par
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
-          <Users className="text-blue-600 mb-2" size={24} />
-          <div className="text-2xl font-bold text-blue-900">{stats.total}</div>
-          <div className="text-xs font-medium text-blue-600 uppercase tracking-wider">Total Candidates</div>
+        <div className="bg-gradient-to-br from-blue-50/50 to-indigo-50/50 p-4 rounded-3xl border border-blue-100/50 shadow-sm relative overflow-hidden group">
+          <div className="relative z-10">
+            <div className="w-10 h-10 rounded-xl bg-blue-600/10 flex items-center justify-center mb-3">
+              <Users className="text-blue-600" size={20} />
+            </div>
+            <div className="text-2xl font-black text-slate-900 leading-none">{stats.total}</div>
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Candidates</div>
+          </div>
+          <div className="absolute -right-2 -bottom-2 text-blue-600/5 group-hover:scale-110 transition-transform duration-500">
+            <Users size={64} />
+          </div>
         </div>
-        <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
-          <CheckCircle2 className="text-emerald-600 mb-2" size={24} />
-          <div className="text-2xl font-bold text-emerald-900">{stats.completed}</div>
-          <div className="text-xs font-medium text-emerald-600 uppercase tracking-wider">Completed</div>
+
+        <div className="bg-gradient-to-br from-emerald-50/50 to-teal-50/50 p-4 rounded-3xl border border-emerald-100/50 shadow-sm relative overflow-hidden group">
+          <div className="relative z-10">
+            <div className="w-10 h-10 rounded-xl bg-emerald-600/10 flex items-center justify-center mb-3">
+              <CheckCircle2 className="text-emerald-600" size={20} />
+            </div>
+            <div className="text-2xl font-black text-slate-900 leading-none">{stats.completed}</div>
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Completed</div>
+          </div>
+          <div className="absolute -right-2 -bottom-2 text-emerald-600/5 group-hover:scale-110 transition-transform duration-500">
+            <CheckCircle2 size={64} />
+          </div>
         </div>
-        <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100">
-          <Clock className="text-orange-600 mb-2" size={24} />
-          <div className="text-2xl font-bold text-orange-900">{stats.active}</div>
-          <div className="text-xs font-medium text-orange-600 uppercase tracking-wider">Active</div>
+
+        <div className="bg-gradient-to-br from-orange-50/50 to-amber-50/50 p-4 rounded-3xl border border-orange-100/50 shadow-sm relative overflow-hidden group">
+          <div className="relative z-10">
+            <div className="w-10 h-10 rounded-xl bg-orange-600/10 flex items-center justify-center mb-3">
+              <Clock className="text-orange-600" size={20} />
+            </div>
+            <div className="text-2xl font-black text-slate-900 leading-none">{stats.active}</div>
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Active</div>
+          </div>
+          <div className="absolute -right-2 -bottom-2 text-orange-600/5 group-hover:scale-110 transition-transform duration-500">
+            <Clock size={64} />
+          </div>
         </div>
-        <div className="bg-rose-50 p-4 rounded-2xl border border-rose-100">
-          <IndianRupee className="text-rose-600 mb-2" size={24} />
-          <div className="text-xl font-bold text-rose-900">{formatCurrency(stats.pendingFee)}</div>
-          <div className="text-xs font-medium text-rose-600 uppercase tracking-wider">Pending Fee</div>
+
+        <div className="bg-gradient-to-br from-rose-50/50 to-pink-50/50 p-4 rounded-3xl border border-rose-100/50 shadow-sm relative overflow-hidden group">
+          <div className="relative z-10">
+            <div className="w-10 h-10 rounded-xl bg-rose-600/10 flex items-center justify-center mb-3">
+              <IndianRupee className="text-rose-600" size={18} />
+            </div>
+            <div className="text-xl font-black text-slate-900 leading-none">{formatCurrency(stats.pendingFee)}</div>
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Pending</div>
+          </div>
+          <div className="absolute -right-2 -bottom-2 text-rose-600/5 group-hover:scale-110 transition-transform duration-500">
+            <IndianRupee size={64} />
+          </div>
         </div>
       </div>
 
@@ -178,43 +202,26 @@ const Dashboard = ({ onNavigate, showToast }: { onNavigate: (screen: string, par
           )}
         </div>
       </div>
-
-      <button 
-        onClick={() => onNavigate('add-candidate')}
-        className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-transform"
-      >
-        <UserPlus size={20} />
-        Add New Candidate
-      </button>
+      {/* Remove Add New Candidate button since we only fetch live live now */}
     </div>
   );
 };
 
 const CandidateList = ({ onNavigate, showToast }: { onNavigate: (screen: string, params?: any) => void, showToast: (m: string, t?: 'success' | 'error') => void }) => {
   const [search, setSearch] = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
-  const candidates = useLiveQuery(() => 
-    db.candidates.filter(c => 
-      c.name.toLowerCase().includes(search.toLowerCase()) || 
-      c.mobile.includes(search)
-    ).toArray(),
-    [search]
-  ) || [];
+  const { candidates: allCandidates, isLoading: isSyncing, fetchCandidates } = useCandidates();
+  
+  const candidates = allCandidates.filter(c => 
+    c.name.toLowerCase().includes(search.toLowerCase()) || 
+    c.mobile.includes(search)
+  );
 
   const handleSync = async () => {
-    setIsSyncing(true);
     try {
-      const result = await syncCandidates();
-      if (result.total > 0) {
-        showToast(`Sync: ${result.added} new, ${result.updated} updated`, 'success');
-      } else {
-        showToast('Sync complete. No candidates found.', 'success');
-      }
-    } catch (error) {
-      console.error('Sync failed:', error);
-      showToast('Sync failed. Check connection or API key.', 'error');
-    } finally {
-      setIsSyncing(false);
+      await fetchCandidates();
+      showToast('Fetched live candidates from server', 'success');
+    } catch {
+      showToast('Failed to fetch from server', 'error');
     }
   };
 
@@ -249,25 +256,29 @@ const CandidateList = ({ onNavigate, showToast }: { onNavigate: (screen: string,
 
         <div className="space-y-3">
           {candidates.map(candidate => (
-            <div 
+            <motion.div 
+              layout
               key={candidate.id} 
               onClick={() => onNavigate('profile', { id: candidate.id })}
-              className="bg-white p-4 rounded-2xl border border-slate-100 flex items-center gap-4 shadow-sm active:scale-[0.98] transition-transform"
+              className="group bg-white p-4 rounded-2xl border border-slate-100 flex items-center gap-4 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.05)] active:scale-[0.98] transition-all hover:border-blue-200"
             >
-              <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 overflow-hidden">
-                {candidate.photo ? <img src={candidate.photo} alt="" className="w-full h-full object-cover" /> : <Users size={24} />}
+              <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 overflow-hidden ring-2 ring-slate-100 group-hover:ring-blue-100 transition-all">
+                {candidate.photo ? <img src={candidate.photo} alt="" className="w-full h-full object-cover" /> : <Users size={22} />}
               </div>
-              <div className="flex-1">
-                <div className="font-bold text-slate-900">{candidate.name}</div>
-                <div className="text-xs text-slate-500">{candidate.mobile}</div>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-slate-900 truncate">{candidate.name}</div>
+                <div className="text-xs text-slate-500 font-medium">{candidate.mobile}</div>
               </div>
               <div className={cn(
-                "px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider",
-                candidate.status === 'active' ? "bg-blue-50 text-blue-600" : "bg-emerald-50 text-emerald-600"
+                "px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-tighter border",
+                candidate.status === 'active' 
+                  ? "bg-blue-50 text-blue-600 border-blue-100" 
+                  : "bg-emerald-50 text-emerald-600 border-emerald-100"
               )}>
                 {candidate.status}
               </div>
-            </div>
+              <ChevronRight size={18} className="text-slate-300 transition-transform group-hover:translate-x-0.5" />
+            </motion.div>
           ))}
           {candidates.length === 0 && (
             <div className="text-center py-12 space-y-4">
@@ -286,17 +297,12 @@ const CandidateList = ({ onNavigate, showToast }: { onNavigate: (screen: string,
         </div>
       </div>
       
-      <button 
-        onClick={() => onNavigate('add-candidate')}
-        className="fixed bottom-24 right-6 w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-xl active:scale-90 transition-transform z-40"
-      >
-        <Plus size={28} />
-      </button>
+      {/* Remove float button for adding candidates as it is read-only from server */}
     </div>
   );
 };
 
-const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editId?: number, showToast: (m: string) => void }) => {
+const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editId?: string, showToast: (m: string) => void }) => {
   const [formData, setFormData] = useState<Partial<Candidate>>({
     name: '',
     mobile: '',
@@ -310,22 +316,17 @@ const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editI
   });
 
   useEffect(() => {
+    // Cannot edit directly if candidates are read-only from live API,
+    // Just closing the screen if navigated here accidentally
     if (editId) {
-      db.candidates.get(editId).then(candidate => {
-        if (candidate) setFormData(candidate);
-      });
+      showToast('Editing is handled on the spreadsheet server side now.');
+      onBack();
     }
-  }, [editId]);
+  }, [editId, onBack, showToast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editId) {
-      await db.candidates.update(editId, formData);
-      showToast('Candidate updated successfully');
-    } else {
-      await db.candidates.add(formData as Candidate);
-      showToast('Candidate added successfully');
-    }
+    showToast('Add Candidate capability is disabled (Live API mode). Do it on the backend spreadsheet.');
     onBack();
   };
 
@@ -448,30 +449,19 @@ const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editI
   );
 };
 
-const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast }: { id: number, onNavigate: (screen: string, params?: any) => void, onBack: () => void, showConfirm: (t: string, m: string, c: () => void) => void, showToast: (m: string) => void }) => {
-  const candidate = useLiveQuery(() => db.candidates.get(id), [id]);
-  const attendance = useLiveQuery(() => db.attendance.where('candidateId').equals(id).toArray(), [id]) || [];
+const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast }: { id: string, onNavigate: (screen: string, params?: any) => void, onBack: () => void, showConfirm: (t: string, m: string, c: () => void) => void, showToast: (m: string) => void }) => {
+  const { candidates } = useCandidates();
+  const candidate = candidates.find(c => c.id === id);
   const documents = useLiveQuery(() => db.documents.where('candidateId').equals(id).toArray(), [id]) || [];
 
   if (!candidate) return null;
 
-  const attendanceCount = attendance.length;
+  const attendanceCount = candidate.serverAttendance || 0;
   const progress = Math.min((attendanceCount / 25) * 100, 100);
   const remainingFee = candidate.totalFee - candidate.collectedFee;
 
   const handleDelete = () => {
-    showConfirm(
-      'Delete Candidate',
-      'Are you sure you want to delete this candidate? All data will be lost.',
-      async () => {
-        await db.candidates.delete(id);
-        await db.attendance.where('candidateId').equals(id).delete();
-        await db.payments.where('candidateId').equals(id).delete();
-        await db.documents.where('candidateId').equals(id).delete();
-        showToast('Candidate deleted');
-        onBack();
-      }
-    );
+    showToast('Deleting candidates must be done from the API/Spreadsheet directly');
   };
 
   const handlePrint = () => {
@@ -601,34 +591,15 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast }: { 
   );
 };
 
-const AttendanceScreen = ({ candidateId, showToast }: { candidateId?: number, showToast: (m: string, t?: 'success' | 'error') => void }) => {
-  const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(candidateId || null);
-  const candidates = useLiveQuery(() => db.candidates.where('status').equals('active').toArray()) || [];
-  const attendance = useLiveQuery(() => 
-    selectedCandidateId ? db.attendance.where('candidateId').equals(selectedCandidateId).toArray() : Promise.resolve([]),
-    [selectedCandidateId]
-  ) || [];
+const AttendanceScreen = ({ candidateId, showToast }: { candidateId?: string, showToast: (m: string, t?: 'success' | 'error') => void }) => {
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(candidateId || null);
+  const { candidates: allCandidates } = useCandidates();
+  const candidates = allCandidates.filter(c => c.status === 'active');
+  const selectedCandidate = candidates.find(c => c.id === selectedCandidateId);
+  const attendanceCount = selectedCandidate?.serverAttendance || 0;
 
   const handleMarkAttendance = async () => {
-    if (!selectedCandidateId) return;
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const existing = await db.attendance.where({ candidateId: selectedCandidateId, date: today }).first();
-    
-    if (existing) {
-      showToast('Attendance already marked for today', 'error');
-      return;
-    }
-
-    await db.attendance.add({ candidateId: selectedCandidateId, date: today });
-    
-    // Check for completion
-    const count = await db.attendance.where('candidateId').equals(selectedCandidateId).count();
-    if (count >= 25) {
-      await db.candidates.update(selectedCandidateId, { status: 'completed' });
-      showToast('Course Completed! 25 days reached');
-    } else {
-      showToast('Attendance marked successfully');
-    }
+    showToast('Marking attendance must be done from the API/Spreadsheet directly', 'error');
   };
 
   const today = new Date();
@@ -643,7 +614,7 @@ const AttendanceScreen = ({ candidateId, showToast }: { candidateId?: number, sh
         <select 
           className="w-full bg-slate-100 border-none rounded-2xl py-3 px-4 focus:ring-2 focus:ring-blue-500 outline-none"
           value={selectedCandidateId || ''}
-          onChange={(e) => setSelectedCandidateId(Number(e.target.value))}
+          onChange={(e) => setSelectedCandidateId(e.target.value)}
         >
           <option value="">Choose a candidate...</option>
           {candidates.map(c => (
@@ -658,7 +629,7 @@ const AttendanceScreen = ({ candidateId, showToast }: { candidateId?: number, sh
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-900">{format(today, 'MMMM yyyy')}</h3>
               <div className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
-                {attendance.length} / 25 Days
+                {attendanceCount} / 25 Days
               </div>
             </div>
             
@@ -667,15 +638,14 @@ const AttendanceScreen = ({ candidateId, showToast }: { candidateId?: number, sh
                 <div key={d} className="text-center text-[10px] font-bold text-slate-400">{d}</div>
               ))}
               {days.map(day => {
-                const isMarked = attendance.some(a => isSameDay(parseISO(a.date), day));
                 const isToday = isSameDay(day, today);
+                // Simulated checked days just for visual feedback based on count
                 return (
                   <div 
                     key={day.toString()} 
                     className={cn(
-                      "aspect-square rounded-lg flex items-center justify-center text-xs font-bold transition-all",
-                      isMarked ? "bg-emerald-500 text-white" : "bg-slate-50 text-slate-400",
-                      isToday && !isMarked && "ring-2 ring-blue-500 ring-offset-2"
+                      "aspect-square rounded-lg flex items-center justify-center text-xs font-bold transition-all bg-slate-50 text-slate-400",
+                      isToday && "ring-2 ring-blue-500 ring-offset-2"
                     )}
                   >
                     {format(day, 'd')}
@@ -702,32 +672,19 @@ const AttendanceScreen = ({ candidateId, showToast }: { candidateId?: number, sh
   );
 };
 
-const FeesScreen = ({ candidateId, showToast }: { candidateId?: number, showToast: (m: string) => void }) => {
-  const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(candidateId || null);
+const FeesScreen = ({ candidateId, showToast }: { candidateId?: string, showToast: (m: string) => void }) => {
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(candidateId || null);
   const [amount, setAmount] = useState('');
-  const candidates = useLiveQuery(() => db.candidates.toArray()) || [];
-  const selectedCandidate = useLiveQuery(() => selectedCandidateId ? db.candidates.get(selectedCandidateId) : Promise.resolve(null), [selectedCandidateId]);
+  const { candidates } = useCandidates();
+  const selectedCandidate = candidates.find(c => c.id === selectedCandidateId);
   const payments = useLiveQuery(() => 
     selectedCandidateId ? db.payments.where('candidateId').equals(selectedCandidateId).reverse().toArray() : Promise.resolve([]),
     [selectedCandidateId]
   ) || [];
 
   const handleAddPayment = async () => {
-    if (!selectedCandidateId || !amount || !selectedCandidate) return;
-    
-    const paymentAmount = Number(amount);
-    await db.payments.add({
-      candidateId: selectedCandidateId,
-      amount: paymentAmount,
-      date: new Date().toISOString(),
-    });
-
-    await db.candidates.update(selectedCandidateId, {
-      collectedFee: selectedCandidate.collectedFee + paymentAmount
-    });
-
+    showToast('Payment processing must be done on the Spreadsheet API. Local modifications disabled.');
     setAmount('');
-    showToast('Payment recorded successfully');
   };
 
   return (
@@ -737,7 +694,7 @@ const FeesScreen = ({ candidateId, showToast }: { candidateId?: number, showToas
         <select 
           className="w-full bg-slate-100 border-none rounded-2xl py-3 px-4 focus:ring-2 focus:ring-blue-500 outline-none"
           value={selectedCandidateId || ''}
-          onChange={(e) => setSelectedCandidateId(Number(e.target.value))}
+          onChange={(e) => setSelectedCandidateId(e.target.value)}
         >
           <option value="">Choose a candidate...</option>
           {candidates.map(c => (
@@ -818,9 +775,10 @@ const FeesScreen = ({ candidateId, showToast }: { candidateId?: number, showToas
   );
 };
 
-const DocumentsScreen = ({ candidateId, onBack, showConfirm, showToast }: { candidateId: number, onBack: () => void, showConfirm: (t: string, m: string, c: () => void) => void, showToast: (m: string) => void }) => {
+const DocumentsScreen = ({ candidateId, onBack, showConfirm, showToast }: { candidateId: string, onBack: () => void, showConfirm: (t: string, m: string, c: () => void) => void, showToast: (m: string) => void }) => {
   const [type, setType] = useState<Document['type']>('Aadhaar');
-  const candidate = useLiveQuery(() => db.candidates.get(candidateId), [candidateId]);
+  const { candidates } = useCandidates();
+  const candidate = candidates.find(c => c.id === candidateId);
   const documents = useLiveQuery(() => db.documents.where('candidateId').equals(candidateId).toArray(), [candidateId]) || [];
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -976,6 +934,25 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   const [modal, setModal] = useState<{ title: string, content: React.ReactNode, footer: React.ReactNode } | null>(null);
 
+  const [globalCandidates, setGlobalCandidates] = useState<Candidate[]>([]);
+  const [isFetchingCandidates, setIsFetchingCandidates] = useState(true);
+
+  const fetchCandidates = useCallback(async () => {
+    setIsFetchingCandidates(true);
+    try {
+      const data = await fetchCandidatesFromServer();
+      setGlobalCandidates(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsFetchingCandidates(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCandidates();
+  }, [fetchCandidates]);
+
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
   };
@@ -1048,42 +1025,52 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 max-w-md mx-auto shadow-2xl relative overflow-x-hidden">
-      <Header 
-        title={getTitle()} 
-        showBack={history.length > 0 || !['dashboard', 'candidates', 'attendance', 'fees'].includes(currentScreen.id)} 
-        onBack={goBack} 
-      />
-      
-      <main className="relative">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentScreen.id}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-          >
-            {renderScreen()}
-          </motion.div>
+    <CandidatesContext.Provider value={{ candidates: globalCandidates, isLoading: isFetchingCandidates, fetchCandidates }}>
+      <div className="min-h-screen bg-slate-50 font-sans text-slate-900 max-w-md mx-auto shadow-2xl relative overflow-x-hidden">
+        <Header 
+          title={getTitle()} 
+          showBack={history.length > 0 || !['dashboard', 'candidates', 'attendance', 'fees'].includes(currentScreen.id)} 
+          onBack={goBack} 
+        />
+        
+        <main className="relative">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentScreen.id}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+            >
+              {isFetchingCandidates && currentScreen.id !== 'dashboard' && globalCandidates.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-20 opacity-50">
+                  <Clock className="animate-spin mb-4" size={32} />
+                  <p className="text-sm font-bold uppercase tracking-widest text-slate-500">Loading Live Data...</p>
+                </div>
+              ) : (
+                renderScreen()
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </main>
+
+        <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+
+        <AnimatePresence>
+          {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+          {modal && (
+            <Modal 
+              isOpen={!!modal} 
+              onClose={() => setModal(null)} 
+              title={modal.title} 
+              footer={modal.footer}
+            >
+              {modal.content}
+            </Modal>
+          )}
         </AnimatePresence>
-      </main>
-
-      <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
-
-      <AnimatePresence>
-        {toast && <Toast {...toast} onClose={() => setToast(null)} />}
-        {modal && (
-          <Modal 
-            isOpen={!!modal} 
-            onClose={() => setModal(null)} 
-            title={modal.title} 
-            footer={modal.footer}
-          >
-            {modal.content}
-          </Modal>
-        )}
-      </AnimatePresence>
-    </div>
+      </div>
+    </CandidatesContext.Provider>
   );
 }
+

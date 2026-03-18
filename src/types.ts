@@ -1,5 +1,5 @@
 export interface Candidate {
-  id?: number;
+  id: string; // Changed to string
   name: string;
   mobile: string;
   address: string;
@@ -10,17 +10,18 @@ export interface Candidate {
   status: 'active' | 'completed';
   totalFee: number;
   collectedFee: number;
+  serverAttendance?: number;
 }
 
 export interface Attendance {
   id?: number;
-  candidateId: number;
+  candidateId: string;
   date: string; // YYYY-MM-DD
 }
 
 export interface Payment {
   id?: number;
-  candidateId: number;
+  candidateId: string;
   amount: number;
   date: string;
   note?: string;
@@ -28,9 +29,10 @@ export interface Payment {
 
 export interface Document {
   id?: number;
-  candidateId: number;
+  candidateId: string;
   type: 'Aadhaar' | 'Photo' | 'Address Proof' | 'Other';
   name: string;
   data: string; // Base64
   uploadDate: string;
 }
+
