@@ -30,6 +30,7 @@ export async function addCandidateToServer(candidate: Candidate): Promise<{ succ
       aadhaar: candidate.aadhaar,
       joinDate: candidate.joiningDate,
       course: candidate.courseType,  // e.g. "LMV", "MCWG", "MCWOG", "HMV"
+      totalFee: candidate.totalFee,
     }),
   });
 
@@ -70,7 +71,13 @@ export async function fetchCandidatesFromServer() {
       else if (rawData.status === 'success' && rawData.data) items = Array.isArray(rawData.data) ? rawData.data : [rawData.data];
     }
 
-    return items.map(item => {
+    const validItems = items.filter((item: any) => {
+      const name = String(item.name || item.candidateName || '').trim();
+      const phone = String(item.phone || item.mobile || '').trim();
+      return name !== '' || phone !== '';
+    });
+
+    return validItems.map((item: any) => {
       // Map based on the NEW structure shared by the user
       const candidate: Candidate = {
         id: String(item.candidateId || item.id || `temp-${Math.random()}`),
@@ -206,6 +213,27 @@ export async function getCandidateDetailsFromServer(candidateId: string): Promis
     return response.json();
   } catch (error) {
     console.error('Get details failed:', error);
+    throw error;
+  }
+}
+
+export async function getPaymentsByCandidateId(candidateId: string): Promise<any> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'getPaymentsByCandidateId',
+        candidateId,
+      }),
+    });
+    if (!response.ok) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
+  } catch (error) {
+    console.error('Get payments failed:', error);
     throw error;
   }
 }

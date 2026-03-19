@@ -22,7 +22,7 @@ import { db } from './db';
 import { Candidate, Attendance, Payment, Document } from './types';
 import { cn, formatCurrency } from './utils';
 import { createContext, useContext } from 'react';
-import { fetchCandidatesFromServer, addCandidateToServer, getDashboardData, markAttendanceOnServer, uploadDocumentToServer, deleteCandidateFromServer, addPaymentToServer, getCandidateDetailsFromServer } from './services/api';
+import { fetchCandidatesFromServer, addCandidateToServer, getDashboardData, markAttendanceOnServer, uploadDocumentToServer, deleteCandidateFromServer, addPaymentToServer, getCandidateDetailsFromServer, getPaymentsByCandidateId } from './services/api';
 
 const CandidatesContext = createContext<{
   candidates: Candidate[];
@@ -517,9 +517,10 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetc
     const fetchHistory = async () => {
       setLoadingHistory(true);
       try {
-        const details = await getCandidateDetailsFromServer(id);
-        if (details && details.payments) {
-          setPaymentHistory(details.payments);
+        const res = await getPaymentsByCandidateId(id);
+        if (res) {
+          const payments = Array.isArray(res) ? res : (res.data || res.payments || []);
+          setPaymentHistory(payments);
         }
       } catch (e) {
         console.error('Failed to fetch profile details:', e);
@@ -681,7 +682,7 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetc
               paymentHistory.map((p, i) => (
                 <div key={i} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex justify-between items-center">
                   <div>
-                    <div className="font-bold text-slate-900">{formatCurrency(p.amount)}</div>
+                    <div className="font-bold text-slate-900">{formatCurrency(p.amount || p.paidAmount || 0)}</div>
                     <div className="text-xs text-slate-400">{p.date ? format(parseISO(p.date), 'MMM d, yyyy') : 'Unknown Date'}</div>
                   </div>
                   <div className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">Paid</div>
@@ -828,8 +829,11 @@ const FeesScreen = ({ candidateId, showToast, fetchCandidates }: { candidateId?:
 
   useEffect(() => {
     if (selectedCandidateId) {
-      getCandidateDetailsFromServer(selectedCandidateId).then(details => {
-        if (details && details.payments) setPaymentHistory(details.payments);
+      getPaymentsByCandidateId(selectedCandidateId).then(res => {
+        if (res) {
+          const payments = Array.isArray(res) ? res : (res.data || res.payments || []);
+          setPaymentHistory(payments);
+        }
       }).catch(console.error);
     }
   }, [selectedCandidateId]);
@@ -844,8 +848,11 @@ const FeesScreen = ({ candidateId, showToast, fetchCandidates }: { candidateId?:
         setAmount('');
         await fetchCandidates();
         // Refresh history
-        const details = await getCandidateDetailsFromServer(selectedCandidateId);
-        if (details && details.payments) setPaymentHistory(details.payments);
+        const resPayment = await getPaymentsByCandidateId(selectedCandidateId);
+        if (resPayment) {
+          const payments = Array.isArray(resPayment) ? resPayment : (resPayment.data || resPayment.payments || []);
+          setPaymentHistory(payments);
+        }
       } else {
         showToast(`Error: ${res.message}`, 'error');
       }
@@ -925,7 +932,7 @@ const FeesScreen = ({ candidateId, showToast, fetchCandidates }: { candidateId?:
               {paymentHistory.map((payment, i) => (
                 <div key={i} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex justify-between items-center">
                   <div>
-                    <div className="font-bold text-slate-900">{formatCurrency(payment.amount)}</div>
+                    <div className="font-bold text-slate-900">{formatCurrency(payment.amount || payment.paidAmount || 0)}</div>
                     <div className="text-xs text-slate-400">{payment.date ? format(parseISO(payment.date), 'MMM d, yyyy') : 'Online Payment'}</div>
                   </div>
                   <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
