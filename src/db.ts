@@ -15,6 +15,9 @@ export class RTODatabase extends Dexie {
       payments: '++id, candidateId, date',
       documents: '++id, candidateId, type'
     });
+    this.version(2).stores({
+      candidates: '++id, externalId, name, mobile, aadhaar, status',
+    });
   }
 }
 
