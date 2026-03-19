@@ -120,25 +120,42 @@ export async function getDashboardData(): Promise<{ totalCandidates: number; com
   return response.json();
 }
 
-export async function markAttendanceOnServer(candidateId: string): Promise<{ success: boolean; message: string }> {
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'text/plain;charset=utf-8',
-    },
-    body: JSON.stringify({
-      apiKey: API_KEY,
-      action: 'markAttendance',
-      candidateId
-    }),
-  });
+export async function markAttendanceOnServer(candidateId: string): Promise<{ success: boolean; message: string; total?: number }> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'markAttendance',
+        candidateId
+      }),
+    });
 
-  if (!response.ok) {
-    throw new Error(`Server error: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    // Server returns {"error": "..."} or {"message": "Attendance Marked", "total": 1}
+    if (data.error) {
+      return { success: false, message: data.error };
+    }
+    
+    return { 
+      success: true, 
+      message: data.message || "Attendance Marked",
+      total: data.total
+    };
+  } catch (error: any) {
+    console.error('Attendance error:', error);
+    return { success: false, message: error.message || 'Server connection failed' };
   }
-
-  return response.json();
 }
+
 
 export async function uploadDocumentToServer(candidateId: string, fileName: string, mimeType: string, file: string): Promise<{ success: boolean; message: string }> {
   try {
@@ -199,6 +216,7 @@ export async function addPaymentToServer(candidateId: string, totalFee: number, 
   }
 }
 
+
 export async function getCandidateDetailsFromServer(candidateId: string): Promise<any> {
   try {
     const response = await fetch(API_URL, {
@@ -237,3 +255,4 @@ export async function getPaymentsByCandidateId(candidateId: string): Promise<any
     throw error;
   }
 }
+

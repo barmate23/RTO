@@ -19,10 +19,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, parseISO } from 'date-fns';
 import { db } from './db';
-import { Candidate, Attendance, Payment, Document } from './types';
+import { Candidate, Document, Attendance, Payment } from './types';
 import { cn, formatCurrency } from './utils';
 import { createContext, useContext } from 'react';
-import { fetchCandidatesFromServer, addCandidateToServer, getDashboardData, markAttendanceOnServer, uploadDocumentToServer, deleteCandidateFromServer, addPaymentToServer, getCandidateDetailsFromServer, getPaymentsByCandidateId } from './services/api';
+import { fetchCandidatesFromServer, addCandidateToServer, getDashboardData, uploadDocumentToServer, deleteCandidateFromServer, getCandidateDetailsFromServer, markAttendanceOnServer, addPaymentToServer, getPaymentsByCandidateId } from './services/api';
 
 const CandidatesContext = createContext<{
   candidates: Candidate[];
@@ -42,8 +42,6 @@ const BottomNav = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTa
   const tabs = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
     { id: 'candidates', icon: Users, label: 'Candidates' },
-    { id: 'attendance', icon: CalendarCheck, label: 'Attendance' },
-    { id: 'fees', icon: IndianRupee, label: 'Fees' },
   ];
 
   return (
@@ -95,16 +93,21 @@ const Dashboard = ({ onNavigate, showToast }: { onNavigate: (screen: string, par
     }
   };
 
+  const totalCollected = candidates.reduce((acc, c) => acc + (c.collectedFee || 0), 0);
+  const totalPending = candidates.reduce((acc, c) => acc + ((c.totalFee || 0) - (c.collectedFee || 0)), 0);
+
   const stats = serverStats ? {
     total: serverStats.totalCandidates,
     active: serverStats.active,
     completed: serverStats.completed,
-    pendingFee: serverStats.pendingFee,
+    collected: totalCollected, // Prefer local reduction for accuracy
+    pending: totalPending
   } : {
     total: candidates.length,
     active: candidates.filter(c => c.status === 'active').length,
     completed: candidates.filter(c => c.status === 'completed').length,
-    pendingFee: candidates.reduce((acc, c) => acc + (c.totalFee - c.collectedFee), 0),
+    collected: totalCollected,
+    pending: totalPending
   };
 
   return (
@@ -112,7 +115,7 @@ const Dashboard = ({ onNavigate, showToast }: { onNavigate: (screen: string, par
       <div className="bg-blue-600 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden">
         <div className="relative z-10">
           <h2 className="text-lg font-bold opacity-80">Welcome Back</h2>
-          <p className="text-2xl font-bold mt-1">RTO Training Center</p>
+          <p className="text-2xl font-bold mt-1">Sankalp Training School</p>
           <button
             onClick={handleSync}
             disabled={isSyncing}
@@ -131,36 +134,47 @@ const Dashboard = ({ onNavigate, showToast }: { onNavigate: (screen: string, par
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-gradient-to-br from-blue-50/50 to-indigo-50/50 p-4 rounded-3xl border border-blue-100/50 shadow-sm relative overflow-hidden group">
+        {/* Row 1: Finances */}
+        <div className="bg-slate-900 text-white p-5 rounded-3xl shadow-xl relative overflow-hidden group col-span-2">
+          <div className="relative z-10 flex justify-between items-start">
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Fee Collected</div>
+              <div className="text-3xl font-black text-emerald-400">{formatCurrency(stats.collected)}</div>
+            </div>
+            <div className="bg-white/10 p-3 rounded-2xl group-hover:scale-110 transition-transform">
+              <IndianRupee size={24} />
+            </div>
+          </div>
+          <div className="relative z-10 mt-6 pt-5 border-t border-white/10 flex justify-between items-end">
+            <div>
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Pending Amount</div>
+              <div className="text-xl font-bold text-rose-400">{formatCurrency(stats.pending)}</div>
+            </div>
+            <div className="text-[10px] font-black uppercase text-slate-500 bg-white/5 px-2 py-1 rounded-lg">Live Summary</div>
+          </div>
+          <div className="absolute -right-4 -bottom-4 text-white/5 opacity-50 group-hover:scale-125 transition-transform duration-700">
+            <IndianRupee size={120} />
+          </div>
+        </div>
+
+        {/* Row 2: Status Cards */}
+        <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-lg relative overflow-hidden group">
           <div className="relative z-10">
-            <div className="w-10 h-10 rounded-xl bg-blue-600/10 flex items-center justify-center mb-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center mb-3">
               <Users className="text-blue-600" size={20} />
             </div>
             <div className="text-2xl font-black text-slate-900 leading-none">{stats.total}</div>
-            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Candidates</div>
+            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Total</div>
           </div>
           <div className="absolute -right-2 -bottom-2 text-blue-600/5 group-hover:scale-110 transition-transform duration-500">
             <Users size={64} />
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-emerald-50/50 to-teal-50/50 p-4 rounded-3xl border border-emerald-100/50 shadow-sm relative overflow-hidden group">
+        <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-lg relative overflow-hidden group">
           <div className="relative z-10">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600/10 flex items-center justify-center mb-3">
-              <CheckCircle2 className="text-emerald-600" size={20} />
-            </div>
-            <div className="text-2xl font-black text-slate-900 leading-none">{stats.completed}</div>
-            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Completed</div>
-          </div>
-          <div className="absolute -right-2 -bottom-2 text-emerald-600/5 group-hover:scale-110 transition-transform duration-500">
-            <CheckCircle2 size={64} />
-          </div>
-        </div>
-
-        <div className="bg-gradient-to-br from-orange-50/50 to-amber-50/50 p-4 rounded-3xl border border-orange-100/50 shadow-sm relative overflow-hidden group">
-          <div className="relative z-10">
-            <div className="w-10 h-10 rounded-xl bg-orange-600/10 flex items-center justify-center mb-3">
-              <Clock className="text-orange-600" size={20} />
+            <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center mb-3">
+              <Clock className="text-orange-500" size={20} />
             </div>
             <div className="text-2xl font-black text-slate-900 leading-none">{stats.active}</div>
             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Active</div>
@@ -170,16 +184,23 @@ const Dashboard = ({ onNavigate, showToast }: { onNavigate: (screen: string, par
           </div>
         </div>
 
-        <div className="bg-gradient-to-br from-rose-50/50 to-pink-50/50 p-4 rounded-3xl border border-rose-100/50 shadow-sm relative overflow-hidden group">
-          <div className="relative z-10">
-            <div className="w-10 h-10 rounded-xl bg-rose-600/10 flex items-center justify-center mb-3">
-              <IndianRupee className="text-rose-600" size={18} />
+        <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-lg relative overflow-hidden group col-span-2">
+          <div className="relative z-10 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center">
+                <CheckCircle2 className="text-emerald-600" size={24} />
+              </div>
+              <div>
+                <div className="text-2xl font-black text-slate-900 leading-none">{stats.completed}</div>
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Students Completed</div>
+              </div>
             </div>
-            <div className="text-xl font-black text-slate-900 leading-none">{formatCurrency(stats.pendingFee)}</div>
-            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Pending</div>
+            <div className="text-emerald-500">
+              <ChevronRight size={20} />
+            </div>
           </div>
-          <div className="absolute -right-2 -bottom-2 text-rose-600/5 group-hover:scale-110 transition-transform duration-500">
-            <IndianRupee size={64} />
+          <div className="absolute right-10 -bottom-4 text-emerald-600/5 opacity-50">
+            <CheckCircle2 size={80} />
           </div>
         </div>
       </div>
@@ -222,7 +243,7 @@ const Dashboard = ({ onNavigate, showToast }: { onNavigate: (screen: string, par
   );
 };
 
-const CandidateList = ({ onNavigate, showToast }: { onNavigate: (screen: string, params?: any) => void, showToast: (m: string, t?: 'success' | 'error') => void }) => {
+const CandidateList = ({ onNavigate, showToast, setActiveTab }: { onNavigate: (screen: string, params?: any) => void, showToast: (m: string, t?: 'success' | 'error') => void, setActiveTab: (tab: string) => void }) => {
   const [search, setSearch] = useState('');
   const { candidates: allCandidates, isLoading: isSyncing, fetchCandidates } = useCandidates();
 
@@ -322,16 +343,12 @@ const CandidateList = ({ onNavigate, showToast }: { onNavigate: (screen: string,
   );
 };
 
-const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editId?: string, showToast: (m: string, t?: 'success' | 'error') => void }) => {
+const AddCandidate = ({ onBack, onNavigate, editId, showToast, setActiveTab, fetchCandidates }: { onBack: () => void, onNavigate: (s: string, p?: any) => void, editId?: string, showToast: (m: string, t?: 'success' | 'error') => void, setActiveTab: (tab: string) => void, fetchCandidates: () => Promise<void> }) => {
   const [formData, setFormData] = useState<Partial<Candidate>>({
     name: '',
     mobile: '',
     address: '',
     aadhaar: '',
-    joiningDate: format(new Date(), 'yyyy-MM-dd'),
-    courseType: 'LMV',
-    totalFee: 5000,
-    collectedFee: 0,
     status: 'active'
   });
   const [isSaving, setIsSaving] = useState(false);
@@ -353,24 +370,35 @@ const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editI
         await db.candidates.update(editId, formData);
         showToast('Candidate updated successfully');
       } else {
-        // Save locally first
-        await db.candidates.add(formData as Candidate);
-        showToast('Candidate saved locally');
+        // Save locally first for instant UX
+        const tempId = `temp-${Date.now()}`;
+        const newCandidate = { ...formData, id: tempId } as Candidate;
+        await db.candidates.add(newCandidate);
+        showToast('Processing...', 'success');
+
+        // Redirect to listing screen immediately for better UX
+        setActiveTab('candidates');
+        onNavigate('candidates');
 
         // Then sync to server in background
         try {
-          const result = await addCandidateToServer(formData as Candidate);
+          const result = await addCandidateToServer(newCandidate);
           if (result.success) {
-            showToast('Candidate synced to server ✓');
+            showToast('Candidate added successfully ✓', 'success');
+            // Refresh from server to get the real ID and updated list
+            await fetchCandidates();
           } else {
-            showToast(`Server: ${result.message}`);
+            showToast(`Server: ${result.message}`, 'error');
+            // Remove the temp candidate if server failed? 
+            // Or leave it for retry. For now, we'll refresh to be safe.
+            await fetchCandidates();
           }
         } catch (serverError) {
           console.error('Server sync failed:', serverError);
-          showToast('Saved locally, server sync failed');
+          showToast('Added locally, server sync failed', 'error');
+          await fetchCandidates();
         }
       }
-      onBack();
     } finally {
       setIsSaving(false);
     }
@@ -447,7 +475,7 @@ const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editI
               onChange={(e) => setFormData({ ...formData, address: e.target.value })}
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Joining Date</label>
               <input
@@ -456,16 +484,6 @@ const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editI
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:ring-2 focus:ring-blue-500 outline-none"
                 value={formData.joiningDate}
                 onChange={(e) => setFormData({ ...formData, joiningDate: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Fee</label>
-              <input
-                required
-                type="number"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:ring-2 focus:ring-blue-500 outline-none"
-                value={formData.totalFee}
-                onChange={(e) => setFormData({ ...formData, totalFee: Number(e.target.value) })}
               />
             </div>
           </div>
@@ -509,9 +527,12 @@ const AddCandidate = ({ onBack, editId, showToast }: { onBack: () => void, editI
 const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetchCandidates }: { id: string, onNavigate: (screen: string, params?: any) => void, onBack: () => void, showConfirm: (t: string, m: string, c: () => void) => void, showToast: (m: string, t?: 'success' | 'error') => void, fetchCandidates: () => Promise<void> }) => {
   const { candidates } = useCandidates();
   const candidate = candidates.find(c => c.id === id);
+  const documents = useLiveQuery(() => db.documents.where('candidateId').equals(id).toArray(), [id]) || [];
   const [paymentHistory, setPaymentHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const documents = useLiveQuery(() => db.documents.where('candidateId').equals(id).toArray(), [id]) || [];
+  const [isMarking, setIsMarking] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [amount, setAmount] = useState('');
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -537,6 +558,55 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetc
   const progress = Math.min((attendanceCount / 25) * 100, 100);
   const remainingFee = candidate.totalFee - candidate.collectedFee;
 
+  const handleMarkAttendance = async () => {
+    setIsMarking(true);
+    try {
+      const res = await markAttendanceOnServer(id);
+      if (res.success) {
+        showToast(res.message || 'Attendance marked!', 'success');
+        await fetchCandidates();
+      } else {
+        showToast(res.message, 'error');
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Failed to mark attendance', 'error');
+    } finally {
+      setIsMarking(false);
+    }
+  };
+
+  const handleAddPayment = async () => {
+    const numAmount = Number(amount);
+    if (!amount || isNaN(numAmount) || numAmount <= 0) return;
+    
+    if (numAmount > remainingFee) {
+      showToast(`Amount exceeds remaining balance (${formatCurrency(remainingFee)})`, 'error');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const res = await addPaymentToServer(id, candidate.totalFee, numAmount);
+      if (res.success) {
+        showToast('Payment recorded successfully', 'success');
+        setAmount('');
+        await fetchCandidates();
+        // Refresh history
+        const paymentsRes = await getPaymentsByCandidateId(id);
+        if (paymentsRes) {
+          const payments = Array.isArray(paymentsRes) ? paymentsRes : (paymentsRes.data || paymentsRes.payments || []);
+          setPaymentHistory(payments);
+        }
+      } else {
+        showToast(res.message, 'error');
+      }
+    } catch (e: any) {
+      showToast('Failed to process payment', 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleDelete = () => {
     showConfirm(
       'Delete Candidate',
@@ -558,9 +628,6 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetc
     );
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
 
   return (
     <div className="pb-24 print:pb-0">
@@ -576,144 +643,154 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetc
             <div className="mt-2 flex gap-2 print:hidden">
               <button
                 onClick={() => onNavigate('add-candidate', { editId: id })}
-                className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg uppercase tracking-wider"
+                className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white px-3 py-1.5 rounded-lg uppercase tracking-wider transition-all duration-300"
               >
                 Edit
               </button>
               <button
                 onClick={handleDelete}
-                className="text-xs font-bold text-rose-600 bg-rose-50 px-3 py-1.5 rounded-lg uppercase tracking-wider"
+                className="text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white px-3 py-1.5 rounded-lg uppercase tracking-wider transition-all duration-300"
               >
                 Delete
               </button>
-              <button
-                onClick={handlePrint}
-                className="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg uppercase tracking-wider"
-              >
-                Report
-              </button>
             </div>
           </div>
         </div>
 
-        {/* Attendance Progress */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-slate-900">Course Progress</h3>
-            <span className="text-sm font-bold text-blue-600">{attendanceCount} / 25 Days</span>
-          </div>
-          <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden print:hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              className="h-full bg-blue-600"
-            />
-          </div>
-          <p className="text-xs text-slate-500">Course automatically completes at 25 days of attendance.</p>
-          <button
-            onClick={async () => {
-              if (candidate && candidate.id) {
-                try {
-                  const res = await markAttendanceOnServer(candidate.id);
-                  if (res.success) {
-                    showToast('Attendance marked! ✓');
-                    await fetchCandidates();
-                  } else {
-                    showToast(`Error: ${res.message}`, 'error');
-                  }
-                } catch (e) {
-                  showToast('Server error marking attendance', 'error');
-                }
-              }
-            }}
-            className="w-full py-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-sm hover:bg-blue-100 transition-colors"
-          >
-            Mark Today's Attendance
-          </button>
-        </div>
 
-        {/* Fee Status */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
-          <h3 className="font-bold text-slate-900">Fee Summary</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total</div>
-              <div className="text-lg font-bold text-slate-900">{formatCurrency(candidate.totalFee)}</div>
-            </div>
-            <div>
-              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Remaining</div>
-              <div className="text-lg font-bold text-rose-600">{formatCurrency(remainingFee)}</div>
-            </div>
-          </div>
-          <button
-            onClick={() => onNavigate('fees', { candidateId: id })}
-            className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-sm active:scale-[0.98] transition-transform print:hidden"
-          >
-            Manage Payments
-          </button>
-        </div>
-
-        {/* Quick Info */}
-        <div className="space-y-4">
-          <h3 className="font-bold text-slate-900">Details</h3>
-          <div className="grid grid-cols-1 gap-3">
-            <div className="bg-slate-50 p-4 rounded-xl">
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Aadhaar</div>
-              <div className="text-sm font-medium text-slate-900">{candidate.aadhaar}</div>
-            </div>
-            <div className="bg-slate-50 p-4 rounded-xl">
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Course</div>
-              <div className="text-sm font-medium text-slate-900">{candidate.courseType}</div>
-            </div>
-            <div className="bg-slate-50 p-4 rounded-xl">
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Address</div>
-              <div className="text-sm font-medium text-slate-900">{candidate.address}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Payment History View */}
-        <div className="space-y-4">
-          <h3 className="font-bold text-slate-900">Payment History</h3>
-          <div className="space-y-3">
-            {loadingHistory ? (
-              <div className="text-center py-4 text-slate-400 text-sm">Loading payments...</div>
-            ) : paymentHistory.length > 0 ? (
-              paymentHistory.map((p, i) => (
-                <div key={i} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex justify-between items-center">
-                  <div>
-                    <div className="font-bold text-slate-900">{formatCurrency(p.amount || p.paidAmount || 0)}</div>
-                    <div className="text-xs text-slate-400">{p.date ? format(parseISO(p.date), 'MMM d, yyyy') : 'Unknown Date'}</div>
-                  </div>
-                  <div className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">Paid</div>
+        {/* Dashboard Grid */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-slate-900 text-white p-5 rounded-3xl shadow-xl relative overflow-hidden group col-span-2">
+            <div className="relative z-10">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Remaining Balance</div>
+              <div className="text-3xl font-black">{formatCurrency(remainingFee)}</div>
+              <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/10">
+                <div className="flex-1">
+                  <div className="text-[9px] font-bold text-slate-500 uppercase">Total Fee</div>
+                  <div className="text-sm font-bold">{formatCurrency(candidate.totalFee)}</div>
                 </div>
-              ))
-            ) : (
-              <div className="text-center py-4 text-slate-400 text-xs italic">No server payment history found.</div>
+                <div className="flex-1">
+                  <div className="text-[9px] font-bold text-slate-500 uppercase text-right">Collected</div>
+                  <div className="text-sm font-bold text-emerald-400 text-right">{formatCurrency(candidate.collectedFee)}</div>
+                </div>
+              </div>
+            </div>
+            <div className="absolute -right-4 -bottom-4 text-white/5 group-hover:scale-110 transition-transform">
+              <IndianRupee size={100} />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
+            <div className="relative z-10 flex flex-col h-full">
+              <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center mb-3">
+                <CalendarCheck className="text-orange-500" size={20} />
+              </div>
+              <div className="text-2xl font-black text-slate-900 leading-none">{attendanceCount}</div>
+              <div className="text-[10px] font-bold text-slate-500 uppercase mt-1">Days Present</div>
+            </div>
+            <div className="absolute -right-2 -bottom-2 text-orange-500/5">
+              <CalendarCheck size={50} />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
+            <div className="relative z-10 flex flex-col h-full">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center mb-3">
+                <FileText className="text-blue-500" size={20} />
+              </div>
+              <div className="text-2xl font-black text-slate-900 leading-none">{documents.length}</div>
+              <div className="text-[10px] font-bold text-slate-500 uppercase mt-1">Documents</div>
+            </div>
+            <div className="absolute -right-2 -bottom-2 text-blue-500/5">
+              <FileText size={50} />
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="space-y-4">
+          <h3 className="font-black text-slate-900 text-sm uppercase tracking-widest">Attendance</h3>
+          <button
+            onClick={handleMarkAttendance}
+            disabled={isMarking}
+            className={cn(
+              "w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-lg active:scale-95",
+              isMarking ? "bg-amber-100 text-amber-600" : "bg-blue-600 text-white shadow-blue-200"
+            )}
+          >
+            {isMarking ? <Clock size={20} className="animate-spin" /> : <CheckCircle2 size={20} />}
+            {isMarking ? 'Marking...' : 'Mark Attendance Today'}
+          </button>
+        </div>
+
+        {/* Payment Input */}
+        <div className="space-y-4">
+          <h3 className="font-black text-slate-900 text-sm uppercase tracking-widest">Collect Fee</h3>
+          <div className="flex gap-3">
+            <div className="relative flex-1">
+              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</div>
+              <input
+                type="number"
+                placeholder="0.00"
+                className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-10 pr-4 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
+            </div>
+            <button
+              onClick={handleAddPayment}
+              disabled={isProcessing || !amount}
+              className="px-8 bg-slate-900 text-white rounded-2xl font-bold active:scale-95 transition-all shadow-lg disabled:opacity-50"
+            >
+              Post
+            </button>
+          </div>
+        </div>
+
+        {/* Payment History */}
+        <div className="space-y-4">
+          <div className="flex justify-between items-center">
+            <h3 className="font-black text-slate-900 text-sm uppercase tracking-widest">Payment History</h3>
+          </div>
+          <div className="space-y-3">
+            {paymentHistory.map((payment, i) => (
+              <div key={i} className="bg-white p-4 rounded-2xl border border-slate-100 flex justify-between items-center shadow-sm">
+                <div>
+                  <div className="font-bold text-slate-900">{formatCurrency(payment.amount || payment.paidAmount || 0)}</div>
+                  <div className="text-[10px] text-slate-400 font-medium">{payment.date ? format(parseISO(payment.date), 'MMM d, yyyy') : 'Live Sync'}</div>
+                </div>
+                <div className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase">Success</div>
+              </div>
+            ))}
+            {paymentHistory.length === 0 && !loadingHistory && (
+              <div className="text-center py-6 text-slate-400 text-xs italic">No payments found.</div>
+            )}
+            {loadingHistory && (
+              <div className="text-center py-6 text-slate-400 text-xs animate-pulse">Loading history...</div>
             )}
           </div>
         </div>
 
         {/* Documents */}
-        <div className="space-y-4 print:hidden">
+        <div className="space-y-4 pb-10">
           <div className="flex justify-between items-center">
-            <h3 className="font-bold text-slate-900">Documents</h3>
+            <h3 className="font-black text-slate-900 text-sm uppercase tracking-widest">Documents</h3>
             <button
               onClick={() => onNavigate('documents', { candidateId: id })}
-              className="text-blue-600 text-sm font-bold"
+              className="text-blue-600 text-xs font-black uppercase tracking-widest"
             >
               Add New
             </button>
           </div>
           <div className="grid grid-cols-2 gap-3">
             {documents.map(doc => (
-              <div key={doc.id} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-                  <FileText size={20} />
+              <div key={doc.id} className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
+                  <FileText size={18} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-bold text-slate-900 truncate">{doc.type}</div>
-                  <div className="text-[10px] text-slate-400">{format(parseISO(doc.uploadDate), 'MMM d')}</div>
+                  <div className="text-[11px] font-bold text-slate-900 truncate tracking-tight">{doc.type}</div>
+                  <div className="text-[9px] text-slate-400 font-medium">{format(parseISO(doc.uploadDate), 'MMM d')}</div>
                 </div>
               </div>
             ))}
@@ -727,233 +804,7 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetc
   );
 };
 
-const AttendanceScreen = ({ candidateId, showToast, fetchCandidates }: { candidateId?: string, showToast: (m: string, t?: 'success' | 'error') => void, fetchCandidates: () => Promise<void> }) => {
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(candidateId || null);
-  const { candidates: allCandidates } = useCandidates();
-  const candidates = allCandidates.filter(c => c.status === 'active');
-  const selectedCandidate = candidates.find(c => c.id === selectedCandidateId);
-  const attendanceCount = selectedCandidate?.serverAttendance || 0;
 
-  const handleMarkAttendance = async () => {
-    if (!selectedCandidateId) return;
-    try {
-      const res = await markAttendanceOnServer(selectedCandidateId);
-      if (res.success) {
-        showToast('Attendance marked! ✓');
-        await fetchCandidates();
-      } else {
-        showToast(`Error: ${res.message}`, 'error');
-      }
-    } catch (e) {
-      showToast('Server error marking attendance', 'error');
-    }
-  };
-
-  const today = new Date();
-  const monthStart = startOfMonth(today);
-  const monthEnd = endOfMonth(today);
-  const days = eachDayOfInterval({ start: monthStart, end: monthEnd });
-
-  return (
-    <div className="p-6 space-y-6 pb-24">
-      <div className="space-y-2">
-        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Select Candidate</label>
-        <select
-          className="w-full bg-slate-100 border-none rounded-2xl py-3 px-4 focus:ring-2 focus:ring-blue-500 outline-none"
-          value={selectedCandidateId || ''}
-          onChange={(e) => setSelectedCandidateId(e.target.value)}
-        >
-          <option value="">Choose a candidate...</option>
-          {candidates.map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {selectedCandidateId ? (
-        <>
-          <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-6">
-            <div className="flex justify-between items-center">
-              <h3 className="font-bold text-slate-900">{format(today, 'MMMM yyyy')}</h3>
-              <div className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
-                {attendanceCount} / 25 Days
-              </div>
-            </div>
-
-            <div className="grid grid-cols-7 gap-2">
-              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
-                <div key={d} className="text-center text-[10px] font-bold text-slate-400">{d}</div>
-              ))}
-              {days.map(day => {
-                const isToday = isSameDay(day, today);
-                // Simulated checked days just for visual feedback based on count
-                return (
-                  <div
-                    key={day.toString()}
-                    className={cn(
-                      "aspect-square rounded-lg flex items-center justify-center text-xs font-bold transition-all bg-slate-50 text-slate-400",
-                      isToday && "ring-2 ring-blue-500 ring-offset-2"
-                    )}
-                  >
-                    {format(day, 'd')}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <button
-            onClick={handleMarkAttendance}
-            className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
-          >
-            <CheckCircle2 size={20} />
-            Mark Today's Attendance
-          </button>
-        </>
-      ) : (
-        <div className="text-center py-20 text-slate-400 italic">
-          Select an active candidate to view and mark attendance.
-        </div>
-      )}
-    </div>
-  );
-};
-
-const FeesScreen = ({ candidateId, showToast, fetchCandidates }: { candidateId?: string, showToast: (m: string, t?: 'success' | 'error') => void, fetchCandidates: () => Promise<void> }) => {
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(candidateId || null);
-  const [amount, setAmount] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const { candidates } = useCandidates();
-  const selectedCandidate = candidates.find(c => c.id === selectedCandidateId);
-  const [paymentHistory, setPaymentHistory] = useState<any[]>([]);
-
-  useEffect(() => {
-    if (selectedCandidateId) {
-      getPaymentsByCandidateId(selectedCandidateId).then(res => {
-        if (res) {
-          const payments = Array.isArray(res) ? res : (res.data || res.payments || []);
-          setPaymentHistory(payments);
-        }
-      }).catch(console.error);
-    }
-  }, [selectedCandidateId]);
-
-  const handleAddPayment = async () => {
-    if (!selectedCandidateId || !selectedCandidate || !amount) return;
-    setIsProcessing(true);
-    try {
-      const res = await addPaymentToServer(selectedCandidateId, selectedCandidate.totalFee, Number(amount));
-      if (res.success) {
-        showToast('Payment recorded on server! ✓', 'success');
-        setAmount('');
-        await fetchCandidates();
-        // Refresh history
-        const resPayment = await getPaymentsByCandidateId(selectedCandidateId);
-        if (resPayment) {
-          const payments = Array.isArray(resPayment) ? resPayment : (resPayment.data || resPayment.payments || []);
-          setPaymentHistory(payments);
-        }
-      } else {
-        showToast(`Error: ${res.message}`, 'error');
-      }
-    } catch (e) {
-      showToast('Server error processing payment', 'error');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  return (
-    <div className="p-6 space-y-6 pb-24">
-      <div className="space-y-2">
-        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Select Candidate</label>
-        <select
-          className="w-full bg-slate-100 border-none rounded-2xl py-3 px-4 focus:ring-2 focus:ring-blue-500 outline-none"
-          value={selectedCandidateId || ''}
-          onChange={(e) => setSelectedCandidateId(e.target.value)}
-        >
-          <option value="">Choose a candidate...</option>
-          {candidates.map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {selectedCandidate ? (
-        <>
-          <div className="bg-slate-900 text-white p-6 rounded-3xl shadow-xl space-y-6">
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Remaining Balance</div>
-                <div className="text-3xl font-bold mt-1">{formatCurrency(selectedCandidate.totalFee - selectedCandidate.collectedFee)}</div>
-              </div>
-              <div className="bg-white/10 p-3 rounded-2xl">
-                <IndianRupee size={24} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/10">
-              <div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Fee</div>
-                <div className="text-sm font-bold">{formatCurrency(selectedCandidate.totalFee)}</div>
-              </div>
-              <div>
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Collected</div>
-                <div className="text-sm font-bold text-emerald-400">{formatCurrency(selectedCandidate.collectedFee)}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <h3 className="font-bold text-slate-900">Add Payment</h3>
-            <div className="flex gap-3">
-              <input
-                type="number"
-                placeholder="Amount"
-                className="flex-1 bg-slate-100 border-none rounded-2xl py-3 px-4 focus:ring-2 focus:ring-blue-500 outline-none"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
-              <button
-                onClick={handleAddPayment}
-                disabled={isProcessing}
-                className={cn(
-                  "bg-blue-600 text-white px-6 rounded-2xl font-bold active:scale-95 transition-transform",
-                  isProcessing && "opacity-50 pointer-events-none"
-                )}
-              >
-                {isProcessing ? 'Adding...' : 'Add'}
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <h3 className="font-bold text-slate-900">Payment History</h3>
-            <div className="space-y-3">
-              {paymentHistory.map((payment, i) => (
-                <div key={i} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex justify-between items-center">
-                  <div>
-                    <div className="font-bold text-slate-900">{formatCurrency(payment.amount || payment.paidAmount || 0)}</div>
-                    <div className="text-xs text-slate-400">{payment.date ? format(parseISO(payment.date), 'MMM d, yyyy') : 'Online Payment'}</div>
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600">
-                    <CheckCircle2 size={16} />
-                  </div>
-                </div>
-              ))}
-              {paymentHistory.length === 0 && (
-                <div className="text-center py-8 text-slate-400 italic text-sm">No payment history found on server.</div>
-              )}
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="text-center py-20 text-slate-400 italic">
-          Select a candidate to manage fees and payments.
-        </div>
-      )}
-    </div>
-  );
-};
 
 const DocumentsScreen = ({ candidateId, onBack, showConfirm, showToast, fetchCandidates }: { candidateId: string, onBack: () => void, showConfirm: (t: string, m: string, c: () => void) => void, showToast: (m: string, t?: 'success' | 'error') => void, fetchCandidates: () => Promise<void> }) => {
   const [type, setType] = useState<Document['type']>('Aadhaar');
@@ -1126,18 +977,22 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   const [modal, setModal] = useState<{ title: string, content: React.ReactNode, footer: React.ReactNode } | null>(null);
 
-  const [globalCandidates, setGlobalCandidates] = useState<Candidate[]>([]);
-  const [isFetchingCandidates, setIsFetchingCandidates] = useState(true);
+  const localCandidates = useLiveQuery(() => db.candidates.toArray()) || [];
+  const [isSyncing, setIsSyncing] = useState(false);
 
   const fetchCandidates = useCallback(async () => {
-    setIsFetchingCandidates(true);
+    setIsSyncing(true);
     try {
       const data = await fetchCandidatesFromServer();
-      setGlobalCandidates(data);
+      // Clear and bulkAdd to maintain local-server parity
+      await db.transaction('rw', db.candidates, async () => {
+        await db.candidates.clear();
+        await db.candidates.bulkAdd(data);
+      });
     } catch (err) {
-      console.error(err);
+      console.error('Fetch error:', err);
     } finally {
-      setIsFetchingCandidates(false);
+      setIsSyncing(false);
     }
   }, []);
 
@@ -1193,10 +1048,8 @@ export default function App() {
   const renderScreen = () => {
     switch (currentScreen.id) {
       case 'dashboard': return <Dashboard onNavigate={navigate} showToast={showToast} />;
-      case 'candidates': return <CandidateList onNavigate={navigate} showToast={showToast} />;
-      case 'attendance': return <AttendanceScreen candidateId={currentScreen.params.candidateId} showToast={showToast} fetchCandidates={fetchCandidates} />;
-      case 'fees': return <FeesScreen candidateId={currentScreen.params.candidateId} showToast={showToast} fetchCandidates={fetchCandidates} />;
-      case 'add-candidate': return <AddCandidate onBack={goBack} editId={currentScreen.params.editId} showToast={showToast} />;
+      case 'candidates': return <CandidateList onNavigate={navigate} showToast={showToast} setActiveTab={setActiveTab} />;
+      case 'add-candidate': return <AddCandidate onBack={goBack} onNavigate={navigate} editId={currentScreen.params.editId} showToast={showToast} setActiveTab={setActiveTab} fetchCandidates={fetchCandidates} />;
       case 'profile': return <CandidateProfile id={currentScreen.params.id} onNavigate={navigate} onBack={goBack} showConfirm={showConfirm} showToast={showToast} fetchCandidates={fetchCandidates} />;
       case 'documents': return <DocumentsScreen candidateId={currentScreen.params.candidateId} onBack={goBack} showConfirm={showConfirm} showToast={showToast} fetchCandidates={fetchCandidates} />;
       default: return <Dashboard onNavigate={navigate} showToast={showToast} />;
@@ -1205,23 +1058,21 @@ export default function App() {
 
   const getTitle = () => {
     switch (currentScreen.id) {
-      case 'dashboard': return 'RTO Training Center';
+      case 'dashboard': return 'Sankalp Training School';
       case 'candidates': return 'Candidates';
-      case 'attendance': return 'Attendance';
-      case 'fees': return 'Fee Collection';
       case 'add-candidate': return currentScreen.params.editId ? 'Edit Candidate' : 'New Candidate';
       case 'profile': return 'Candidate Profile';
       case 'documents': return 'Documents';
-      default: return 'RTO Manager';
+      default: return 'Sankalp Manager';
     }
   };
 
   return (
-    <CandidatesContext.Provider value={{ candidates: globalCandidates, isLoading: isFetchingCandidates, fetchCandidates }}>
+    <CandidatesContext.Provider value={{ candidates: localCandidates, isLoading: isSyncing, fetchCandidates }}>
       <div className="min-h-screen bg-slate-50 font-sans text-slate-900 max-w-md mx-auto shadow-2xl relative overflow-x-hidden">
         <Header
           title={getTitle()}
-          showBack={history.length > 0 || !['dashboard', 'candidates', 'attendance', 'fees'].includes(currentScreen.id)}
+          showBack={history.length > 0 || !['dashboard', 'candidates'].includes(currentScreen.id)}
           onBack={goBack}
         />
 
@@ -1234,7 +1085,7 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
             >
-              {isFetchingCandidates && currentScreen.id !== 'dashboard' && globalCandidates.length === 0 ? (
+              {isSyncing && localCandidates.length === 0 ? (
                 <div className="flex flex-col items-center justify-center p-20 opacity-50">
                   <Clock className="animate-spin mb-4" size={32} />
                   <p className="text-sm font-bold uppercase tracking-widest text-slate-500">Loading Live Data...</p>
