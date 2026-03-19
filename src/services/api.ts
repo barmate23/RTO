@@ -14,10 +14,12 @@ const API_KEY = 'RTO_ACADEMY_2026';
  *   courseType  → course
  */
 export async function addCandidateToServer(candidate: Candidate): Promise<{ success: boolean; message: string }> {
+  // Must use text/plain to avoid CORS preflight — Google Apps Script does not handle OPTIONS requests.
+  // The body is still valid JSON; GAS parses it with JSON.parse(e.postData.contents).
   const response = await fetch(API_URL, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': 'text/plain;charset=utf-8',
     },
     body: JSON.stringify({
       apiKey: API_KEY,
@@ -27,7 +29,7 @@ export async function addCandidateToServer(candidate: Candidate): Promise<{ succ
       address: candidate.address,
       aadhaar: candidate.aadhaar,
       joinDate: candidate.joiningDate,
-      course: candidate.courseType,
+      course: candidate.courseType,  // e.g. "LMV", "MCWG", "MCWOG", "HMV"
     }),
   });
 
@@ -92,5 +94,118 @@ export async function fetchCandidatesFromServer() {
   }
 }
 
+export async function getDashboardData(): Promise<{ totalCandidates: number; completed: number; active: number; pendingFee: number }> {
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8',
+    },
+    body: JSON.stringify({
+      apiKey: API_KEY,
+      action: 'getDashboard'
+    }),
+  });
 
+  if (!response.ok) {
+    throw new Error(`Server error: ${response.status}`);
+  }
 
+  return response.json();
+}
+
+export async function markAttendanceOnServer(candidateId: string): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8',
+    },
+    body: JSON.stringify({
+      apiKey: API_KEY,
+      action: 'markAttendance',
+      candidateId
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server error: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+export async function uploadDocumentToServer(candidateId: string, fileName: string, mimeType: string, file: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'uploadDocument',
+        candidateId,
+        fileName,
+        mimeType,
+        file,
+      }),
+    });
+    return response.json();
+  } catch (error) {
+    console.error('Upload failed:', error);
+    throw error;
+  }
+}
+
+export async function deleteCandidateFromServer(candidateId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'deleteCandidate',
+        candidateId,
+      }),
+    });
+    return response.json();
+  } catch (error) {
+    console.error('Delete failed:', error);
+    throw error;
+  }
+}
+
+export async function addPaymentToServer(candidateId: string, totalFee: number, amount: number): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'addPayment',
+        candidateId,
+        totalFee,
+        amount,
+      }),
+    });
+    return response.json();
+  } catch (error) {
+    console.error('Payment failed:', error);
+    throw error;
+  }
+}
+
+export async function getCandidateDetailsFromServer(candidateId: string): Promise<any> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'getCandidateDetails',
+        candidateId,
+      }),
+    });
+    return response.json();
+  } catch (error) {
+    console.error('Get details failed:', error);
+    throw error;
+  }
+}
