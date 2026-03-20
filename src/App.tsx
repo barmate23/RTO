@@ -13,16 +13,19 @@ import {
   FileText,
   Trash2,
   CheckCircle2,
-  Clock
+  Clock,
+  Car as CarIcon,
+  Fuel,
+  Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, parseISO } from 'date-fns';
 import { db } from './db';
-import { Candidate, Document, Attendance, Payment } from './types';
+import { Candidate, Document, Attendance, Payment, Car, PetrolRecord } from './types';
 import { cn, formatCurrency } from './utils';
 import { createContext, useContext } from 'react';
-import { fetchCandidatesFromServer, addCandidateToServer, getDashboardData, uploadDocumentToServer, deleteCandidateFromServer, getCandidateDetailsFromServer, markAttendanceOnServer, addPaymentToServer, getPaymentsByCandidateId } from './services/api';
+import { fetchCandidatesFromServer, addCandidateToServer, getDashboardData, uploadDocumentToServer, deleteCandidateFromServer, getCandidateDetailsFromServer, markAttendanceOnServer, addPaymentToServer, getPaymentsByCandidateId, updateCandidateToServer, addPetrolRecordToServer, fetchPetrolRecordsFromServer } from './services/api';
 
 const CandidatesContext = createContext<{
   candidates: Candidate[];
@@ -42,6 +45,7 @@ const BottomNav = ({ activeTab, setActiveTab }: { activeTab: string, setActiveTa
   const tabs = [
     { id: 'dashboard', icon: LayoutDashboard, label: 'Home' },
     { id: 'candidates', icon: Users, label: 'Candidates' },
+    { id: 'car-management', icon: CarIcon, label: 'Car' },
   ];
 
   return (
@@ -134,6 +138,44 @@ const Dashboard = ({ onNavigate, showToast }: { onNavigate: (screen: string, par
       </div>
 
       <div className="grid grid-cols-2 gap-4">
+        {/* Fuel Consumption Card */}
+        {(() => {
+          const petrolRecords = useLiveQuery(() => db.petrolRecords.toArray()) || [];
+          const now = new Date();
+          const currentMonthRecords = petrolRecords.filter(r => {
+            const d = parseISO(r.date);
+            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+          });
+          const totalMonthlyAmount = currentMonthRecords.reduce((acc, r) => acc + r.amount, 0);
+          const totalMonthlyLiters = currentMonthRecords.reduce((acc, r) => acc + r.liters, 0);
+
+          return (
+            <div 
+              onClick={() => onNavigate('car-management')}
+              className="bg-emerald-600 text-white p-5 rounded-3xl shadow-xl relative overflow-hidden group col-span-2 active:scale-[0.98] transition-all cursor-pointer"
+            >
+              <div className="relative z-10 flex justify-between items-start">
+                <div>
+                  <div className="text-[10px] font-bold text-emerald-200 uppercase tracking-widest mb-1">Fuel Consumption ({format(now, 'MMMM')})</div>
+                  <div className="text-3xl font-black">{formatCurrency(totalMonthlyAmount)}</div>
+                </div>
+                <div className="bg-white/10 p-3 rounded-2xl group-hover:scale-110 transition-transform">
+                  <Fuel size={24} />
+                </div>
+              </div>
+              <div className="relative z-10 mt-6 pt-5 border-t border-white/10 flex justify-between items-end">
+                <div>
+                  <div className="text-[10px] font-bold text-emerald-200 uppercase tracking-widest mb-1">Total Liters</div>
+                  <div className="text-xl font-bold">{totalMonthlyLiters.toFixed(1)} L</div>
+                </div>
+                <div className="text-[10px] font-black uppercase text-emerald-200 bg-white/5 px-2 py-1 rounded-lg">Vehicle Fleet</div>
+              </div>
+              <div className="absolute -right-4 -bottom-4 text-white/5 group-hover:scale-125 transition-transform duration-700">
+                <Fuel size={120} />
+              </div>
+            </div>
+          );
+        })()}
         {/* Row 1: Finances */}
         <div className="bg-slate-900 text-white p-5 rounded-3xl shadow-xl relative overflow-hidden group col-span-2">
           <div className="relative z-10 flex justify-between items-start">
@@ -349,26 +391,53 @@ const AddCandidate = ({ onBack, onNavigate, editId, showToast, setActiveTab, fet
     mobile: '',
     address: '',
     aadhaar: '',
+    joiningDate: format(new Date(), 'yyyy-MM-dd'),
+    courseType: 'LMV',
+    totalFee: 5000,
+    collectedFee: 0,
     status: 'active'
   });
   const [isSaving, setIsSaving] = useState(false);
 
+  const { candidates } = useCandidates();
+
   useEffect(() => {
-    // Cannot edit directly if candidates are read-only from live API,
-    // Just closing the screen if navigated here accidentally
     if (editId) {
-      showToast('Editing is handled on the spreadsheet server side now.');
-      onBack();
+      const candidateToEdit = candidates.find(c => c.id === editId);
+      if (candidateToEdit) {
+        setFormData({
+          ...candidateToEdit,
+          joiningDate: candidateToEdit.joiningDate ? format(parseISO(candidateToEdit.joiningDate), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd')
+        });
+      }
     }
-  }, [editId, onBack, showToast]);
+  }, [editId, candidates]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
       if (editId) {
-        await db.candidates.update(editId, formData);
-        showToast('Candidate updated successfully');
+        // Optimistic local update
+        await db.candidates.update(editId, formData as Candidate);
+        showToast('Updating candidate...', 'success');
+        
+        onBack();
+
+        try {
+          const res = await updateCandidateToServer(editId, formData as Candidate);
+          if (res.success) {
+            showToast('Candidate updated successfully ✓', 'success');
+            await fetchCandidates();
+          } else {
+            showToast(`Update failed: ${res.message}`, 'error');
+            await fetchCandidates();
+          }
+        } catch (err) {
+          console.error('Server update failed:', err);
+          showToast('Updated locally, sync failed', 'error');
+          await fetchCandidates();
+        }
       } else {
         // Save locally first for instant UX
         const tempId = `temp-${Date.now()}`;
@@ -389,8 +458,6 @@ const AddCandidate = ({ onBack, onNavigate, editId, showToast, setActiveTab, fet
             await fetchCandidates();
           } else {
             showToast(`Server: ${result.message}`, 'error');
-            // Remove the temp candidate if server failed? 
-            // Or leave it for retry. For now, we'll refresh to be safe.
             await fetchCandidates();
           }
         } catch (serverError) {
@@ -475,7 +542,7 @@ const AddCandidate = ({ onBack, onNavigate, editId, showToast, setActiveTab, fet
               onChange={(e) => setFormData({ ...formData, address: e.target.value })}
             />
           </div>
-          <div className="grid grid-cols-1 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Joining Date</label>
               <input
@@ -484,6 +551,16 @@ const AddCandidate = ({ onBack, onNavigate, editId, showToast, setActiveTab, fet
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:ring-2 focus:ring-blue-500 outline-none"
                 value={formData.joiningDate}
                 onChange={(e) => setFormData({ ...formData, joiningDate: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Fee</label>
+              <input
+                required
+                type="number"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 focus:ring-2 focus:ring-blue-500 outline-none"
+                value={formData.totalFee}
+                onChange={(e) => setFormData({ ...formData, totalFee: Number(e.target.value) })}
               />
             </div>
           </div>
@@ -911,6 +988,415 @@ const DocumentsScreen = ({ candidateId, onBack, showConfirm, showToast, fetchCan
   );
 };
 
+const CarManagement = ({ onNavigate, showToast, fetchPetrolRecords, isSyncing }: { onNavigate: (s: string, p?: any) => void, showToast: (m: string, t?: 'success' | 'error') => void, fetchPetrolRecords: () => Promise<void>, isSyncing: boolean }) => {
+  const cars = useLiveQuery(() => db.cars.toArray()) || [];
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newCar, setNewCar] = useState({ name: '', number: '' });
+
+  const handleAddCar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCar.name || !newCar.number) return;
+    try {
+      await db.cars.add({
+        id: `car-${Date.now()}`,
+        name: newCar.name,
+        number: newCar.number.toUpperCase()
+      });
+      showToast('Car added successfully', 'success');
+      setNewCar({ name: '', number: '' });
+      setShowAddForm(false);
+    } catch (err) {
+      showToast('Failed to add car', 'error');
+    }
+  };
+
+  return (
+    <div className="p-6 space-y-6 pb-24">
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Car Fleet</h2>
+        <div className="flex gap-2">
+          <button 
+            onClick={fetchPetrolRecords}
+            disabled={isSyncing}
+            className={cn(
+               "p-2 rounded-xl transition-all",
+               isSyncing ? "bg-slate-100 text-slate-400" : "bg-blue-50 text-blue-600 active:scale-95 shadow-sm"
+            )}
+          >
+            <Clock size={20} className={isSyncing ? "animate-spin" : ""} />
+          </button>
+          <button 
+            onClick={() => onNavigate('petrol-calendar')}
+            className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition-colors shadow-sm"
+          >
+            <Calendar size={20} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-4">
+        {Array.from(new Map(cars.map(car => [car.number, car])).values()).map(car => (
+          <motion.div
+            layout
+            key={car.id}
+            onClick={() => onNavigate('petrol-entry', { carId: car.id, carName: car.name, carNumber: car.number })}
+            className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4 active:scale-[0.98] transition-all hover:border-blue-200 group"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-slate-900 text-white flex items-center justify-center shadow-lg group-hover:bg-blue-600 transition-colors">
+              <CarIcon size={28} />
+            </div>
+            <div className="flex-1">
+              <div className="font-black text-slate-900 text-lg leading-tight">{car.name}</div>
+              <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1">{car.number}</div>
+            </div>
+            <div className="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-blue-50 group-hover:text-blue-600 transition-all">
+              <Plus size={20} />
+            </div>
+          </motion.div>
+        ))}
+
+        {cars.length === 0 ? (
+          <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-200">
+            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
+              <CarIcon size={32} />
+            </div>
+            <p className="text-slate-400 font-medium italic">No cars added yet.</p>
+            <button 
+              onClick={() => setShowAddForm(true)}
+              className="mt-4 text-blue-600 font-bold text-sm uppercase tracking-widest"
+            >
+              Add First Car
+            </button>
+          </div>
+        ) : (
+          <div className="pt-4">
+            <div className="bg-blue-50 p-4 rounded-2xl flex items-center gap-3">
+              <Fuel className="text-blue-600" size={20} />
+              <p className="text-xs font-bold text-blue-800 uppercase tracking-wider">Tap on a car to record petrol entry</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {showAddForm && (
+          <div className="fixed inset-0 z-[120] flex items-end justify-center p-6 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              className="bg-white w-full max-w-sm rounded-t-[40px] shadow-2xl overflow-hidden p-8"
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-black text-slate-900">Add New Car</h3>
+                <button onClick={() => setShowAddForm(false)} className="text-slate-400 font-bold hover:text-slate-600 transition-colors">Cancel</button>
+              </div>
+              <form onSubmit={handleAddCar} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Car Name</label>
+                  <input
+                    required
+                    autoFocus
+                    type="text"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 px-4 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="e.g. Maruti Swift"
+                    value={newCar.name}
+                    onChange={(e) => setNewCar({ ...newCar, name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Car Number</label>
+                  <input
+                    required
+                    type="text"
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 px-4 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="e.g. MH 12 AB 1234"
+                    value={newCar.number}
+                    onChange={(e) => setNewCar({ ...newCar, number: e.target.value })}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black shadow-xl active:scale-95 transition-transform"
+                >
+                  SAVE CAR
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <button
+        onClick={() => setShowAddForm(true)}
+        className="fixed bottom-24 right-6 w-16 h-16 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-xl active:scale-90 transition-transform z-40 border-4 border-white"
+      >
+        <Plus size={32} />
+      </button>
+    </div>
+  );
+};
+
+const PetrolEntry = ({ carId, carName, carNumber, onBack, showToast }: { carId: string, carName: string, carNumber: string, onBack: () => void, showToast: (m: string, t?: 'success' | 'error') => void }) => {
+  const [formData, setFormData] = useState({
+    date: format(new Date(), 'yyyy-MM-dd'),
+    liters: '',
+    amount: ''
+  });
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    const record: PetrolRecord = {
+      id: `ptr-${Date.now()}`,
+      carId,
+      carName,
+      carNumber,
+      date: formData.date,
+      liters: Number(formData.liters),
+      amount: Number(formData.amount)
+    };
+
+    try {
+      // Save locally first
+      await db.petrolRecords.add(record);
+      showToast('Record saved locally', 'success');
+
+      // Sync to server
+      const res = await addPetrolRecordToServer(record);
+      if (res.success) {
+        showToast('Record synced to server ✓', 'success');
+      } else {
+        showToast(`Server sync failed: ${res.message}`, 'error');
+      }
+      onBack();
+    } catch (err) {
+      showToast('Failed to save record', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="p-6 space-y-8 pb-24">
+      <div className="bg-slate-900 p-8 rounded-[40px] text-white shadow-2xl relative overflow-hidden">
+        <div className="relative z-10">
+          <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center mb-4 backdrop-blur-md">
+            <Fuel size={24} className="text-blue-400" />
+          </div>
+          <h2 className="text-3xl font-black tracking-tight">{carName}</h2>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em] mt-2">{carNumber}</p>
+        </div>
+        <div className="absolute -right-4 -bottom-4 opacity-10">
+          <CarIcon size={140} />
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="grid grid-cols-1 gap-6">
+          <div className="space-y-1">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Refuel Date</label>
+            <div className="relative">
+              <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <input
+                required
+                type="date"
+                className="w-full bg-white border border-slate-100 rounded-2xl py-4 pl-12 pr-4 font-bold focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+                value={formData.date}
+                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Liters</label>
+              <div className="relative">
+                <input
+                  required
+                  type="number"
+                  step="0.01"
+                  className="w-full bg-white border border-slate-100 rounded-2xl py-4 px-4 font-bold focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+                  placeholder="0.00"
+                  value={formData.liters}
+                  onChange={(e) => setFormData({ ...formData, liters: e.target.value })}
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-300">L</span>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Amount</label>
+              <div className="relative">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">₹</span>
+                <input
+                  required
+                  type="number"
+                  className="w-full bg-white border border-slate-100 rounded-2xl py-4 pl-8 pr-4 font-bold focus:ring-2 focus:ring-blue-500 outline-none shadow-sm"
+                  placeholder="0"
+                  value={formData.amount}
+                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          disabled={isSaving}
+          className={cn(
+            "w-full bg-blue-600 text-white py-5 rounded-3xl font-black shadow-xl shadow-blue-100 transition-all flex items-center justify-center gap-3",
+            isSaving ? "opacity-70 pointer-events-none" : "active:scale-[0.98] hover:bg-blue-700"
+          )}
+        >
+          {isSaving ? (
+            <>
+              <Clock size={20} className="animate-spin" />
+              RECORDING ENTRY...
+            </>
+          ) : (
+            <>
+              <Fuel size={20} />
+              SUBMIT RECORD
+            </>
+          )}
+        </button>
+      </form>
+    </div>
+  );
+};
+
+const PetrolCalendarView = ({ onBack, showToast, fetchPetrolRecords, isSyncing }: { onBack: () => void, showToast: (m: string, t?: 'success' | 'error') => void, fetchPetrolRecords: () => Promise<void>, isSyncing: boolean }) => {
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const records = useLiveQuery(() => db.petrolRecords.toArray()) || [];
+  const [month, setMonth] = useState(new Date());
+
+  const daysInMonth = eachDayOfInterval({
+    start: startOfMonth(month),
+    end: endOfMonth(month)
+  });
+
+  const recordsForMonth = records.filter(r => {
+    const d = parseISO(r.date);
+    return d.getMonth() === month.getMonth() && d.getFullYear() === month.getFullYear();
+  });
+
+  const totalMonthlyAmount = recordsForMonth.reduce((acc, r) => acc + r.amount, 0);
+  const totalMonthlyLiters = recordsForMonth.reduce((acc, r) => acc + r.liters, 0);
+
+  const selectedDateRecords = records.filter(r => isSameDay(parseISO(r.date), selectedDate));
+
+  return (
+    <div className="p-6 space-y-6 pb-24">
+      <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-xl overflow-hidden">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="font-extrabold text-slate-900 text-lg">{format(month, 'MMMM yyyy')}</h3>
+          <div className="flex gap-2">
+            <button 
+              onClick={fetchPetrolRecords}
+              disabled={isSyncing}
+              className={cn(
+                "p-2 rounded-xl transition-all",
+                isSyncing ? "bg-slate-100 text-slate-400" : "bg-blue-50 text-blue-600 active:scale-95"
+              )}
+            >
+              <Clock size={18} className={isSyncing ? "animate-spin" : ""} />
+            </button>
+            <button 
+              onClick={() => setMonth(new Date(month.setMonth(month.getMonth() - 1)))}
+              className="p-2 hover:bg-slate-50 rounded-lg transition-colors"
+            >
+              <ChevronRight className="rotate-180" size={20} />
+            </button>
+            <button 
+              onClick={() => setMonth(new Date(month.setMonth(month.getMonth() + 1)))}
+              className="p-2 hover:bg-slate-50 rounded-lg transition-colors"
+            >
+              <ChevronRight size={20} />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 text-center mb-2">
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
+            <div key={d} className="text-[10px] font-black text-slate-300 uppercase">{d}</div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7 gap-2">
+          {daysInMonth.map(day => {
+            const hasRecord = records.some(r => isSameDay(parseISO(r.date), day));
+            const isSelected = isSameDay(day, selectedDate);
+            const isToday = isSameDay(day, new Date());
+            
+            return (
+              <button
+                key={day.toISOString()}
+                onClick={() => setSelectedDate(day)}
+                className={cn(
+                  "aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all",
+                  isSelected ? "bg-blue-600 text-white shadow-lg" : "hover:bg-slate-50 text-slate-600",
+                  isToday && !isSelected && "ring-2 ring-blue-100"
+                )}
+              >
+                <span className={cn("text-xs font-black", isSelected ? "text-white" : "text-slate-900")}>
+                  {format(day, 'd')}
+                </span>
+                {hasRecord && (
+                  <div className={cn(
+                    "w-1 h-1 rounded-full absolute bottom-1.5",
+                    isSelected ? "bg-white" : "bg-blue-500"
+                  )} />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-slate-900 p-4 rounded-3xl text-white">
+          <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Monthly Cost</div>
+          <div className="text-lg font-black text-emerald-400">{formatCurrency(totalMonthlyAmount)}</div>
+        </div>
+        <div className="bg-white p-4 rounded-3xl border border-slate-100">
+          <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">Monthly Vol</div>
+          <div className="text-lg font-black text-slate-900">{totalMonthlyLiters.toFixed(1)} <span className="text-[10px] text-slate-400">L</span></div>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <h4 className="font-black text-slate-900 text-sm uppercase tracking-widest ml-1">
+          {isSameDay(selectedDate, new Date()) ? 'TODAY' : format(selectedDate, 'MMM d, yyyy')}
+        </h4>
+        <div className="space-y-3">
+          {selectedDateRecords.map(record => (
+            <div key={record.id} className="bg-white p-4 rounded-2xl border border-slate-100 flex items-center gap-4 shadow-sm">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                <Fuel size={20} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-slate-900 truncate tracking-tight">{record.carName}</div>
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{record.carNumber}</div>
+              </div>
+              <div className="text-right">
+                <div className="font-black text-slate-900 leading-none">{formatCurrency(record.amount)}</div>
+                <div className="text-[10px] font-bold text-slate-500 mt-1">{record.liters} L</div>
+              </div>
+            </div>
+          ))}
+          {selectedDateRecords.length === 0 && (
+            <div className="text-center py-10 bg-slate-50/50 rounded-3xl border border-dashed border-slate-200">
+              <p className="text-xs text-slate-400 font-medium italic">No entries for this date.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- Components ---
 
 const Modal = ({ isOpen, onClose, title, children, footer }: { isOpen: boolean, onClose: () => void, title: string, children: React.ReactNode, footer?: React.ReactNode }) => {
@@ -979,26 +1465,70 @@ export default function App() {
 
   const localCandidates = useLiveQuery(() => db.candidates.toArray()) || [];
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isPetrolSyncing, setIsPetrolSyncing] = useState(false);
 
   const fetchCandidates = useCallback(async () => {
     setIsSyncing(true);
     try {
       const data = await fetchCandidatesFromServer();
-      // Clear and bulkAdd to maintain local-server parity
       await db.transaction('rw', db.candidates, async () => {
         await db.candidates.clear();
         await db.candidates.bulkAdd(data);
       });
     } catch (err) {
-      console.error('Fetch error:', err);
+      console.error('Fetch candidates error:', err);
     } finally {
       setIsSyncing(false);
     }
   }, []);
 
+  const fetchPetrolRecords = useCallback(async () => {
+    setIsPetrolSyncing(true);
+    try {
+      const data = await fetchPetrolRecordsFromServer();
+      
+      // Extract unique cars from records
+      const uniqueCars: Car[] = [];
+      const seenCarNumbers = new Set<string>();
+      
+      data.forEach(record => {
+        if (record.carNumber && !seenCarNumbers.has(record.carNumber)) {
+          seenCarNumbers.add(record.carNumber);
+          uniqueCars.push({
+            id: record.carId || `car-${record.carNumber}`,
+            name: record.carName,
+            number: record.carNumber
+          });
+        }
+      });
+
+      await db.transaction('rw', [db.petrolRecords, db.cars], async () => {
+        // Update petrol records
+        await db.petrolRecords.clear();
+        await db.petrolRecords.bulkAdd(data);
+        
+        // Update cars list from server records too
+        if (uniqueCars.length > 0) {
+          // Instead of clear(), we merge with local cars to avoid losing local-only cars
+          for (const car of uniqueCars) {
+            const exists = await db.cars.where('number').equals(car.number).first();
+            if (!exists) {
+              await db.cars.add(car);
+            }
+          }
+        }
+      });
+    } catch (err) {
+      console.error('Fetch petrol error:', err);
+    } finally {
+      setIsPetrolSyncing(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchCandidates();
-  }, [fetchCandidates]);
+    fetchPetrolRecords();
+  }, [fetchCandidates, fetchPetrolRecords]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -1052,6 +1582,9 @@ export default function App() {
       case 'add-candidate': return <AddCandidate onBack={goBack} onNavigate={navigate} editId={currentScreen.params.editId} showToast={showToast} setActiveTab={setActiveTab} fetchCandidates={fetchCandidates} />;
       case 'profile': return <CandidateProfile id={currentScreen.params.id} onNavigate={navigate} onBack={goBack} showConfirm={showConfirm} showToast={showToast} fetchCandidates={fetchCandidates} />;
       case 'documents': return <DocumentsScreen candidateId={currentScreen.params.candidateId} onBack={goBack} showConfirm={showConfirm} showToast={showToast} fetchCandidates={fetchCandidates} />;
+      case 'car-management': return <CarManagement onNavigate={navigate} showToast={showToast} fetchPetrolRecords={fetchPetrolRecords} isSyncing={isPetrolSyncing} />;
+      case 'petrol-entry': return <PetrolEntry carId={currentScreen.params.carId} carName={currentScreen.params.carName} carNumber={currentScreen.params.carNumber} onBack={goBack} showToast={showToast} />;
+      case 'petrol-calendar': return <PetrolCalendarView onBack={goBack} showToast={showToast} fetchPetrolRecords={fetchPetrolRecords} isSyncing={isPetrolSyncing} />;
       default: return <Dashboard onNavigate={navigate} showToast={showToast} />;
     }
   };
@@ -1063,6 +1596,9 @@ export default function App() {
       case 'add-candidate': return currentScreen.params.editId ? 'Edit Candidate' : 'New Candidate';
       case 'profile': return 'Candidate Profile';
       case 'documents': return 'Documents';
+      case 'car-management': return 'Car Fleet';
+      case 'petrol-entry': return 'Petrol Entry';
+      case 'petrol-calendar': return 'Petrol Calendar';
       default: return 'Sankalp Manager';
     }
   };

@@ -1,11 +1,13 @@
 import Dexie, { Table } from 'dexie';
-import { Candidate, Attendance, Payment, Document } from './types';
+import { Candidate, Attendance, Payment, Document, Car, PetrolRecord } from './types';
 
 export class RTODatabase extends Dexie {
   candidates!: Table<Candidate>;
   attendance!: Table<Attendance>;
   payments!: Table<Payment>;
   documents!: Table<Document>;
+  cars!: Table<Car>;
+  petrolRecords!: Table<PetrolRecord>;
 
   constructor() {
     super('RTOTrainingDB');
@@ -17,6 +19,10 @@ export class RTODatabase extends Dexie {
     });
     this.version(2).stores({
       candidates: '++id, externalId, name, mobile, aadhaar, status',
+    });
+    this.version(3).stores({
+      cars: '++id, name, number',
+      petrolRecords: '++id, carId, date, carNumber'
     });
   }
 }

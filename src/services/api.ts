@@ -1,4 +1,4 @@
-import { Candidate } from '../types';
+import { Candidate, PetrolRecord } from '../types';
 import { db } from '../db';
 import { format, subDays } from 'date-fns';
 
@@ -256,3 +256,98 @@ export async function getPaymentsByCandidateId(candidateId: string): Promise<any
   }
 }
 
+export async function updateCandidateToServer(candidateId: string, updates: Partial<Candidate>): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'updateCandidate',
+        candidateId,
+        name: updates.name,
+        phone: updates.mobile,
+        address: updates.address,
+        aadhaar: updates.aadhaar,
+        course: updates.courseType,
+        totalFee: updates.totalFee,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data as { success: boolean; message: string };
+  } catch (error) {
+    console.error('Update candidate failed:', error);
+    throw error;
+  }
+}
+
+export async function addPetrolRecordToServer(record: PetrolRecord): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'addPetrolRecord',
+        date: record.date,
+        liters: record.liters,
+        amount: record.amount,
+        carNumber: record.carNumber,
+        carName: record.carName,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data as { success: boolean; message: string };
+  } catch (error) {
+    console.error('Add petrol record failed:', error);
+    throw error;
+  }
+}
+
+export async function fetchPetrolRecordsFromServer(): Promise<PetrolRecord[]> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'getPetrolRecords'
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const rawData = await response.json();
+    let records: any[] = [];
+    if (Array.isArray(rawData)) {
+      records = rawData;
+    } else if (rawData && typeof rawData === 'object' && Array.isArray(rawData.data)) {
+      records = rawData.data;
+    }
+
+    return records.map((item: any) => ({
+      id: String(item.id || item.recordId || Math.random()),
+      carId: String(item.carId || ''),
+      carName: String(item.carName || ''),
+      carNumber: String(item.carNumber || ''),
+      date: item.date || '',
+      liters: Number(item.liters || 0),
+      amount: Number(item.amount || 0),
+    }));
+  } catch (error) {
+    console.error('Error fetching petrol records:', error);
+    throw error;
+  }
+}

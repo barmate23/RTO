@@ -36,3 +36,19 @@ export interface Document {
   uploadDate: string;
 }
 
+export interface Car {
+  id: string;
+  name: string;
+  number: string;
+}
+
+export interface PetrolRecord {
+  id: string;
+  carId: string;
+  carName: string;
+  carNumber: string;
+  date: string; // YYYY-MM-DD
+  liters: number;
+  amount: number;
+}
+
