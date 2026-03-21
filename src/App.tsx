@@ -25,7 +25,7 @@ import { db } from './db';
 import { Candidate, Document, Attendance, Payment, Car, PetrolRecord } from './types';
 import { cn, formatCurrency } from './utils';
 import { createContext, useContext } from 'react';
-import { fetchCandidatesFromServer, addCandidateToServer, getDashboardData, uploadDocumentToServer, deleteCandidateFromServer, getCandidateDetailsFromServer, markAttendanceOnServer, addPaymentToServer, getPaymentsByCandidateId, updateCandidateToServer, addPetrolRecordToServer, fetchPetrolRecordsFromServer } from './services/api';
+import { fetchCandidatesFromServer, addCandidateToServer, getDashboardData, uploadDocumentToServer, deleteCandidateFromServer, getCandidateDetailsFromServer, markAttendanceOnServer, addPaymentToServer, getPaymentsByCandidateId, updateCandidateToServer, addPetrolRecordToServer, fetchPetrolRecordsFromServer, getAttendanceByCandidateId, deleteAttendanceFromServer } from './services/api';
 
 const CandidatesContext = createContext<{
   candidates: Candidate[];
@@ -601,6 +601,151 @@ const AddCandidate = ({ onBack, onNavigate, editId, showToast, setActiveTab, fet
   );
 };
 
+const AttendanceCalendar = ({ candidateId, showToast, fetchCandidates }: { candidateId: string, showToast: (m: string, t?: 'success' | 'error') => void, fetchCandidates: () => Promise<void> }) => {
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [attendance, setAttendance] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fetchAttendance = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await getAttendanceByCandidateId(candidateId);
+      setAttendance(data);
+    } catch (e) {
+      showToast('Failed to fetch attendance', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [candidateId, showToast]);
+
+  useEffect(() => {
+    fetchAttendance();
+  }, [fetchAttendance]);
+
+  const days = eachDayOfInterval({
+    start: startOfMonth(currentMonth),
+    end: endOfMonth(currentMonth)
+  });
+
+  const handleDateClick = async (date: Date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const existing = attendance.find(a => format(parseISO(a.date), 'yyyy-MM-dd') === dateStr);
+    
+    if (existing) {
+        // Delete
+        try {
+            const res = await deleteAttendanceFromServer(existing.id);
+            if (res.success) {
+                showToast('Attendance removed', 'success');
+                await fetchAttendance();
+                await fetchCandidates();
+            } else {
+                showToast(res.message || 'Failed to remove attendance', 'error');
+            }
+        } catch (e) {
+            showToast('Failed to remove attendance', 'error');
+        }
+    } else {
+        // Mark
+        try {
+            const res = await markAttendanceOnServer(candidateId, dateStr);
+            if (res.success) {
+                showToast('Attendance marked', 'success');
+                await fetchAttendance();
+                await fetchCandidates();
+            } else {
+                showToast(res.message || 'Failed to mark attendance', 'error');
+            }
+        } catch (e) {
+            showToast('Failed to mark attendance', 'error');
+        }
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-xl overflow-hidden">
+          <div className="flex justify-between items-center mb-6">
+            <h3 className="font-extrabold text-slate-900 text-lg">{format(currentMonth, 'MMMM yyyy')}</h3>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1)))}
+                className="p-2 hover:bg-slate-50 rounded-lg transition-colors border border-slate-100 shadow-sm"
+              >
+                <ChevronRight className="rotate-180" size={20} />
+              </button>
+              <button 
+                onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() + 1)))}
+                className="p-2 hover:bg-slate-50 rounded-lg transition-colors border border-slate-100 shadow-sm"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 text-center mb-2">
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
+              <div key={d} className="text-[10px] font-black text-slate-300 uppercase">{d}</div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-2">
+            {days.map(day => {
+              const dateStr = format(day, 'yyyy-MM-dd');
+              const attRecord = attendance.find(a => format(parseISO(a.date), 'yyyy-MM-dd') === dateStr);
+              const hasAttended = !!attRecord;
+              const isToday = isSameDay(day, new Date());
+              
+              return (
+                <button
+                  key={day.toISOString()}
+                  onClick={() => handleDateClick(day)}
+                  className={cn(
+                    "aspect-square rounded-xl flex flex-col items-center justify-center relative transition-all",
+                    hasAttended ? "bg-blue-600 text-white shadow-lg" : "hover:bg-slate-50 text-slate-600 border border-slate-50",
+                    isToday && !hasAttended && "ring-2 ring-blue-100"
+                  )}
+                >
+                  <span className={cn("text-xs font-black", hasAttended ? "text-white" : "text-slate-900")}>
+                    {format(day, 'd')}
+                  </span>
+                  {hasAttended && (
+                    <div className="w-1 h-1 rounded-full absolute bottom-1.5 bg-white" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {isLoading && <div className="text-center mt-4 text-xs text-slate-400 animate-pulse">Syncing attendance...</div>}
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-blue-600 text-white p-5 rounded-3xl shadow-xl relative overflow-hidden group">
+          <div className="relative z-10">
+            <div className="text-[10px] font-black text-blue-200 uppercase tracking-widest mb-1">Present This Month</div>
+            <div className="text-3xl font-black">{attendance.filter(r => {
+              const d = parseISO(r.date);
+              return d.getMonth() === currentMonth.getMonth() && d.getFullYear() === currentMonth.getFullYear();
+            }).length}</div>
+          </div>
+          <div className="absolute -right-2 -bottom-2 text-white/10 group-hover:scale-110 transition-transform">
+            <CalendarCheck size={64} />
+          </div>
+        </div>
+        <div className="bg-slate-900 text-white p-5 rounded-3xl shadow-xl relative overflow-hidden group">
+          <div className="relative z-10">
+            <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Present</div>
+            <div className="text-3xl font-black text-emerald-400">{attendance.length}</div>
+          </div>
+          <div className="absolute -right-2 -bottom-2 text-white/5 group-hover:scale-110 transition-transform">
+            <CheckCircle2 size={64} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetchCandidates }: { id: string, onNavigate: (screen: string, params?: any) => void, onBack: () => void, showConfirm: (t: string, m: string, c: () => void) => void, showToast: (m: string, t?: 'success' | 'error') => void, fetchCandidates: () => Promise<void> }) => {
   const { candidates } = useCandidates();
   const candidate = candidates.find(c => c.id === id);
@@ -610,6 +755,7 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetc
   const [isMarking, setIsMarking] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [amount, setAmount] = useState('');
+  const [profileTab, setProfileTab] = useState<'overview' | 'attendance'>('overview');
 
   useEffect(() => {
     const fetchHistory = async () => {
@@ -707,26 +853,26 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetc
 
 
   return (
-    <div className="pb-24 print:pb-0">
-      <div className="p-6 space-y-8">
+    <div className="pb-24 print:pb-0 font-outfit">
+      <div className="p-6 space-y-6">
         {/* Profile Header */}
         <div className="flex items-center gap-6">
-          <div className="w-24 h-24 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 overflow-hidden border-2 border-slate-200">
+          <div className="w-24 h-24 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 overflow-hidden border-2 border-slate-200 shadow-inner">
             {candidate.photo ? <img src={candidate.photo} alt="" className="w-full h-full object-cover" /> : <Users size={40} />}
           </div>
           <div className="flex-1">
-            <h2 className="text-2xl font-bold text-slate-900">{candidate.name}</h2>
-            <p className="text-slate-500 font-medium">{candidate.mobile}</p>
-            <div className="mt-2 flex gap-2 print:hidden">
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight leading-none">{candidate.name}</h2>
+            <p className="text-slate-500 font-bold mt-1.5 opacity-70 tracking-tight">{candidate.mobile}</p>
+            <div className="mt-4 flex gap-2 print:hidden">
               <button
                 onClick={() => onNavigate('add-candidate', { editId: id })}
-                className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white px-3 py-1.5 rounded-lg uppercase tracking-wider transition-all duration-300"
+                className="text-[10px] font-black tracking-tighter text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white px-4 py-2 rounded-xl uppercase transition-all duration-300"
               >
                 Edit
               </button>
               <button
                 onClick={handleDelete}
-                className="text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white px-3 py-1.5 rounded-lg uppercase tracking-wider transition-all duration-300"
+                className="text-[10px] font-black tracking-tighter text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white px-4 py-2 rounded-xl uppercase transition-all duration-300"
               >
                 Delete
               </button>
@@ -734,148 +880,179 @@ const CandidateProfile = ({ id, onNavigate, onBack, showConfirm, showToast, fetc
           </div>
         </div>
 
-
-        {/* Dashboard Grid */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-slate-900 text-white p-5 rounded-3xl shadow-xl relative overflow-hidden group col-span-2">
-            <div className="relative z-10">
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Remaining Balance</div>
-              <div className="text-3xl font-black">{formatCurrency(remainingFee)}</div>
-              <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/10">
-                <div className="flex-1">
-                  <div className="text-[9px] font-bold text-slate-500 uppercase">Total Fee</div>
-                  <div className="text-sm font-bold">{formatCurrency(candidate.totalFee)}</div>
-                </div>
-                <div className="flex-1">
-                  <div className="text-[9px] font-bold text-slate-500 uppercase text-right">Collected</div>
-                  <div className="text-sm font-bold text-emerald-400 text-right">{formatCurrency(candidate.collectedFee)}</div>
-                </div>
-              </div>
-            </div>
-            <div className="absolute -right-4 -bottom-4 text-white/5 group-hover:scale-110 transition-transform">
-              <IndianRupee size={100} />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
-            <div className="relative z-10 flex flex-col h-full">
-              <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center mb-3">
-                <CalendarCheck className="text-orange-500" size={20} />
-              </div>
-              <div className="text-2xl font-black text-slate-900 leading-none">{attendanceCount}</div>
-              <div className="text-[10px] font-bold text-slate-500 uppercase mt-1">Days Present</div>
-            </div>
-            <div className="absolute -right-2 -bottom-2 text-orange-500/5">
-              <CalendarCheck size={50} />
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group">
-            <div className="relative z-10 flex flex-col h-full">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center mb-3">
-                <FileText className="text-blue-500" size={20} />
-              </div>
-              <div className="text-2xl font-black text-slate-900 leading-none">{documents.length}</div>
-              <div className="text-[10px] font-bold text-slate-500 uppercase mt-1">Documents</div>
-            </div>
-            <div className="absolute -right-2 -bottom-2 text-blue-500/5">
-              <FileText size={50} />
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="space-y-4">
-          <h3 className="font-black text-slate-900 text-sm uppercase tracking-widest">Attendance</h3>
+        {/* Tab Switcher */}
+        <div className="flex bg-slate-100 p-1 rounded-2xl shadow-inner border border-slate-200/50">
           <button
-            onClick={handleMarkAttendance}
-            disabled={isMarking}
+            onClick={() => setProfileTab('overview')}
             className={cn(
-              "w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all shadow-lg active:scale-95",
-              isMarking ? "bg-amber-100 text-amber-600" : "bg-blue-600 text-white shadow-blue-200"
+              "flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300",
+              profileTab === 'overview' ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
             )}
           >
-            {isMarking ? <Clock size={20} className="animate-spin" /> : <CheckCircle2 size={20} />}
-            {isMarking ? 'Marking...' : 'Mark Attendance Today'}
+            Overview
+          </button>
+          <button
+            onClick={() => setProfileTab('attendance')}
+            className={cn(
+              "flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-widest transition-all duration-300",
+              profileTab === 'attendance' ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+            )}
+          >
+            Attendance
           </button>
         </div>
 
-        {/* Payment Input */}
-        <div className="space-y-4">
-          <h3 className="font-black text-slate-900 text-sm uppercase tracking-widest">Collect Fee</h3>
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</div>
-              <input
-                type="number"
-                placeholder="0.00"
-                className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-10 pr-4 font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
+        {profileTab === 'overview' ? (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            {/* Dashboard Grid */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-900 text-white p-6 rounded-[32px] shadow-xl relative overflow-hidden group col-span-2">
+                <div className="relative z-10">
+                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-1">Remaining Balance</div>
+                  <div className="text-4xl font-black text-emerald-400 tracking-tighter">{formatCurrency(remainingFee)}</div>
+                  <div className="flex items-center gap-2 mt-6 pt-6 border-t border-white/5">
+                    <div className="flex-1">
+                      <div className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Total Fee</div>
+                      <div className="text-base font-black opacity-80">{formatCurrency(candidate.totalFee)}</div>
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-[9px] font-black text-slate-500 uppercase text-right tracking-widest">Collected</div>
+                      <div className="text-base font-black text-emerald-500 text-right">{formatCurrency(candidate.collectedFee)}</div>
+                    </div>
+                  </div>
+                </div>
+                <div className="absolute -right-6 -bottom-6 text-white/5 group-hover:scale-110 transition-transform duration-700">
+                  <IndianRupee size={150} />
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-[28px] border border-slate-100 shadow-lg relative overflow-hidden group">
+                <div className="relative z-10 flex flex-col h-full">
+                  <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center mb-4 shadow-sm">
+                    <CalendarCheck className="text-orange-500" size={20} />
+                  </div>
+                  <div className="text-3xl font-black text-slate-900 tracking-tighter leading-none">{attendanceCount}</div>
+                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-2 opacity-60">Days Present</div>
+                </div>
+                <div className="absolute -right-4 -bottom-4 text-orange-500/5 group-hover:scale-110 transition-transform">
+                  <CalendarCheck size={64} />
+                </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-[28px] border border-slate-100 shadow-lg relative overflow-hidden group">
+                <div className="relative z-10 flex flex-col h-full">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center mb-4 shadow-sm">
+                    <FileText className="text-blue-500" size={20} />
+                  </div>
+                  <div className="text-3xl font-black text-slate-900 tracking-tighter leading-none">{documents.length}</div>
+                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-2 opacity-60">Documents</div>
+                </div>
+                <div className="absolute -right-4 -bottom-4 text-blue-500/5 group-hover:scale-110 transition-transform">
+                  <FileText size={64} />
+                </div>
+              </div>
             </div>
-            <button
-              onClick={handleAddPayment}
-              disabled={isProcessing || !amount}
-              className="px-8 bg-slate-900 text-white rounded-2xl font-bold active:scale-95 transition-all shadow-lg disabled:opacity-50"
-            >
-              Post
-            </button>
-          </div>
-        </div>
 
-        {/* Payment History */}
-        <div className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-black text-slate-900 text-sm uppercase tracking-widest">Payment History</h3>
-          </div>
-          <div className="space-y-3">
-            {paymentHistory.map((payment, i) => (
-              <div key={i} className="bg-white p-4 rounded-2xl border border-slate-100 flex justify-between items-center shadow-sm">
-                <div>
-                  <div className="font-bold text-slate-900">{formatCurrency(payment.amount || payment.paidAmount || 0)}</div>
-                  <div className="text-[10px] text-slate-400 font-medium">{payment.date ? format(parseISO(payment.date), 'MMM d, yyyy') : 'Live Sync'}</div>
-                </div>
-                <div className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-600 text-[10px] font-black uppercase">Success</div>
-              </div>
-            ))}
-            {paymentHistory.length === 0 && !loadingHistory && (
-              <div className="text-center py-6 text-slate-400 text-xs italic">No payments found.</div>
-            )}
-            {loadingHistory && (
-              <div className="text-center py-6 text-slate-400 text-xs animate-pulse">Loading history...</div>
-            )}
-          </div>
-        </div>
 
-        {/* Documents */}
-        <div className="space-y-4 pb-10">
-          <div className="flex justify-between items-center">
-            <h3 className="font-black text-slate-900 text-sm uppercase tracking-widest">Documents</h3>
-            <button
-              onClick={() => onNavigate('documents', { candidateId: id })}
-              className="text-blue-600 text-xs font-black uppercase tracking-widest"
-            >
-              Add New
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {documents.map(doc => (
-              <div key={doc.id} className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
-                  <FileText size={18} />
+            {/* Payment Input */}
+            <div className="space-y-4">
+              <h3 className="font-black text-slate-900 text-[10px] uppercase tracking-[0.2em] ml-2 opacity-50">Collect Fee</h3>
+              <div className="flex gap-3">
+                <div className="relative flex-1 group">
+                  <div className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 font-black text-lg group-focus-within:text-blue-600 transition-colors">₹</div>
+                  <input
+                    type="number"
+                    placeholder="0.00"
+                    className="w-full bg-white border-2 border-slate-100 rounded-3xl py-5 pl-12 pr-6 font-black text-lg focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                  />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[11px] font-bold text-slate-900 truncate tracking-tight">{doc.type}</div>
-                  <div className="text-[9px] text-slate-400 font-medium">{format(parseISO(doc.uploadDate), 'MMM d')}</div>
-                </div>
+                <button
+                  onClick={handleAddPayment}
+                  disabled={isProcessing || !amount}
+                  className="px-8 bg-slate-900 text-white rounded-[24px] font-black uppercase tracking-widest text-xs active:scale-95 transition-all shadow-xl disabled:opacity-30 disabled:pointer-events-none hover:bg-black"
+                >
+                  Post
+                </button>
               </div>
-            ))}
-            {documents.length === 0 && (
-              <div className="col-span-2 text-center py-4 text-slate-400 text-xs italic">No documents uploaded.</div>
-            )}
+            </div>
+
+            {/* Payment History */}
+            <div className="space-y-4">
+              <div className="flex justify-between items-center px-2">
+                <h3 className="font-black text-slate-900 text-[10px] uppercase tracking-[0.2em] opacity-50">Payment History</h3>
+                {paymentHistory.length > 0 && <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md uppercase">{paymentHistory.length} TXNS</span>}
+              </div>
+              <div className="space-y-4">
+                {paymentHistory.map((payment, i) => (
+                  <div key={i} className="bg-white p-5 rounded-3xl border border-slate-100 flex justify-between items-center shadow-md hover:border-blue-100 transition-all group">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
+                        <IndianRupee size={22} />
+                      </div>
+                      <div>
+                        <div className="font-black text-slate-900 text-lg tracking-tight leading-none">{formatCurrency(payment.amount || payment.paidAmount || 0)}</div>
+                        <div className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1.5">{payment.date ? format(parseISO(payment.date), 'MMM d, yyyy') : 'Live Sync'}</div>
+                      </div>
+                    </div>
+                    <div className="px-4 py-2 rounded-xl bg-emerald-50/50 text-emerald-600 text-[9px] font-black uppercase tracking-tighter border border-emerald-100">Paid ✓</div>
+                  </div>
+                ))}
+                {paymentHistory.length === 0 && !loadingHistory && (
+                  <div className="text-center py-12 bg-slate-50/50 rounded-[32px] border-2 border-dashed border-slate-200">
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest opacity-60 italic">No payments found.</p>
+                  </div>
+                )}
+                {loadingHistory && (
+                  <div className="text-center py-10">
+                    <div className="w-8 h-8 border-4 border-blue-600/20 border-t-blue-600 rounded-full animate-spin mx-auto mb-2" />
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Loading History...</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Documents */}
+            <div className="space-y-4 pb-12">
+              <div className="flex justify-between items-center px-2">
+                <h3 className="font-black text-slate-900 text-[10px] uppercase tracking-[0.2em] opacity-50">Documents</h3>
+                <button
+                  onClick={() => onNavigate('documents', { candidateId: id })}
+                  className="text-blue-600 text-[10px] font-black uppercase tracking-[0.2em] bg-blue-50 px-3 py-1.5 rounded-xl hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                >
+                  + Add New
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                {documents.map(doc => (
+                  <div key={doc.id} className="bg-white p-4 rounded-[24px] border border-slate-100 shadow-lg flex items-center gap-4 group hover:border-blue-100 transition-all">
+                    <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 shadow-sm group-hover:scale-110 transition-transform shrink-0">
+                      <FileText size={22} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-black text-slate-900 truncate tracking-tight uppercase">{doc.type}</div>
+                      <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">{format(parseISO(doc.uploadDate), 'MMM d, yyyy')}</div>
+                    </div>
+                  </div>
+                ))}
+                {documents.length === 0 && (
+                  <div className="col-span-2 text-center py-10 bg-slate-50/50 rounded-[32px] border-2 border-dashed border-slate-200">
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-widest opacity-60 italic">No files uploaded.</p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 pb-12">
+            <AttendanceCalendar 
+              candidateId={id} 
+              showToast={showToast} 
+              fetchCandidates={fetchCandidates} 
+            />
+          </div>
+        )}
       </div>
     </div>
   );

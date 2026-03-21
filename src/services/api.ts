@@ -120,7 +120,7 @@ export async function getDashboardData(): Promise<{ totalCandidates: number; com
   return response.json();
 }
 
-export async function markAttendanceOnServer(candidateId: string): Promise<{ success: boolean; message: string; total?: number }> {
+export async function markAttendanceOnServer(candidateId: string, date?: string): Promise<{ success: boolean; message: string; total?: number }> {
   try {
     const response = await fetch(API_URL, {
       method: 'POST',
@@ -130,7 +130,8 @@ export async function markAttendanceOnServer(candidateId: string): Promise<{ suc
       body: JSON.stringify({
         apiKey: API_KEY,
         action: 'markAttendance',
-        candidateId
+        candidateId,
+        date 
       }),
     });
 
@@ -153,6 +154,46 @@ export async function markAttendanceOnServer(candidateId: string): Promise<{ suc
   } catch (error: any) {
     console.error('Attendance error:', error);
     return { success: false, message: error.message || 'Server connection failed' };
+  }
+}
+
+export async function getAttendanceByCandidateId(candidateId: string): Promise<any[]> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'getAttendanceByCandidateId',
+        candidateId,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+    const data = await response.json();
+    return Array.isArray(data) ? data : (data.data || []);
+  } catch (error) {
+    console.error('Get attendance failed:', error);
+    return [];
+  }
+}
+
+export async function deleteAttendanceFromServer(attendanceId: string): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        apiKey: API_KEY,
+        action: 'deleteAttendance',
+        attendanceId,
+      }),
+    });
+    return response.json();
+  } catch (error) {
+    console.error('Delete attendance failed:', error);
+    throw error;
   }
 }
 
